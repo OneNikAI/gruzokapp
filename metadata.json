@@ -1,0 +1,5 @@
+{
+  "name": "ГрузОК",
+  "description": "MVP платформа для заказа услуг грузчиков, разнорабочих и мастеров по переезду.",
+  "requestFramePermissions": ["geolocation"]
+}

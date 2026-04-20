@@ -1,0 +1,164 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: chats
+    // Fields:
+    //   - orderId: string (required)
+    //   - customerId: string (required)
+    //   - workerId: string (required)
+    //   - lastMessage: string (optional)
+    //   - lastMessageAt: timestamp (optional)
+    //   - unreadCount: map (optional)
+    //
+    // Collection: chats/{chatId}/messages
+    // Fields:
+    //   - senderId: string (required)
+    //   - text: string (required)
+    //   - createdAt: timestamp (required)
+    //   - readAt: timestamp (optional)
+    //
+    // Collection: users
+    // Fields:
+    //   - name: string (required)
+    //   - phone: string (required)
+    //   - role: string (required)
+    //   - avatar: string (optional)
+    //   - rating: number (optional)
+    //   - reviews: number (optional)
+    //   - balance: number (optional)
+    //   - completedOrders: number (optional)
+    //   - createdAt: timestamp (required)
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidUser(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.phone is string && data.phone.size() > 0 &&
+             data.role in ['customer', 'worker', 'dispatcher'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isChatParticipant(chatData) {
+      return isAuthenticated() && (request.auth.uid == chatData.customerId || request.auth.uid == chatData.workerId || request.auth.uid == chatData.dispatcherId);
+    }
+
+    function isValidChat(data) {
+      return data.orderId is string &&
+             (data.customerId == null || data.customerId is string) &&
+             (data.workerId == null || data.workerId is string) &&
+             (data.dispatcherId == null || data.dispatcherId is string);
+    }
+
+    function isValidMessage(data) {
+      return data.senderId is string &&
+             data.text is string &&
+             data.text.size() > 0 &&
+             data.text.size() < 5000 &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidOrder(data) {
+      return data.title is string && data.title.size() >= 5 && data.title.size() < 200 &&
+             data.customerId is string &&
+             data.status in ['pending_negotiation', 'open', 'in-progress', 'completed'] &&
+             (data.budget == null || data.budget is number) &&
+             (data.address == null || data.address is string) &&
+             (data.lat == null || data.lat is number) &&
+             (data.lng == null || data.lng is number);
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'dispatcher' ||
+          (request.auth.token.email == "nevskiy0602@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidNotification(data) {
+      return data.userId is string &&
+             data.title is string &&
+             data.message is string &&
+             data.type in ['order', 'payment', 'system', 'chat'] &&
+             data.isRead is bool &&
+             data.createdAt is timestamp;
+    }
+
+    match /chats/{chatId} {
+      allow read: if isAuthenticated() && isChatParticipant(resource.data);
+      allow create: if isAuthenticated() && isChatParticipant(request.resource.data) && isValidChat(request.resource.data);
+      allow update: if isAuthenticated() && isChatParticipant(resource.data) && 
+                      (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastMessage', 'lastMessageAt', 'unreadCount']));
+
+      match /messages/{messageId} {
+        allow read: if isAuthenticated() && isChatParticipant(get(/databases/$(database)/documents/chats/$(chatId)).data);
+        allow create: if isAuthenticated() && 
+                        isChatParticipant(get(/databases/$(database)/documents/chats/$(chatId)).data) &&
+                        isValidMessage(request.resource.data) &&
+                        request.resource.data.senderId == request.auth.uid;
+        allow update: if isAuthenticated() && 
+                        isChatParticipant(get(/databases/$(database)/documents/chats/$(chatId)).data) &&
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt']) &&
+                        resource.data.senderId != request.auth.uid; // Only recipient can mark as read
+      }
+    }
+
+    match /users/{userId} {
+      // Allow list for checking user existence by phone during registration
+      // Allow get for viewing profiles
+      allow read: if true; 
+      
+      // Allow creation during registration
+      allow create: if isValidUser(request.resource.data);
+      
+      // Allow update if owner OR if authenticated and only updating UID (for login session sync)
+      allow update: if (isOwner(userId) && isValidUser(request.resource.data)) || 
+                      (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['uid']));
+      
+      // No one can delete users for now
+      allow delete: if false;
+    }
+
+    match /orders/{orderId} {
+      allow read: if true; // Orders are public for workers to see
+      allow create: if isAuthenticated() && isValidOrder(request.resource.data) && request.resource.data.customerId == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        (isOwner(resource.data.customerId) && isValidOrder(request.resource.data)) ||
+        (isAdmin() && isValidOrder(request.resource.data)) ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'workerId', 'assignedWorkers', 'candidates'])) // Workers/System can update status/candidates
+      );
+    }
+
+    match /verification_codes/{phone} {
+      // Allow creation and update of codes (anyone can request a code)
+      allow create, update: if request.resource.data.code is string && 
+                              request.resource.data.code.size() == 4 &&
+                              request.resource.data.createdAt is timestamp;
+      
+      // Allow reading the code to simulate receiving it via SMS/Push
+      allow read: if true;
+      
+      // Allow deletion after use
+      allow delete: if true;
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidNotification(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && 
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+  }
+}
