@@ -8,6 +8,15 @@
   body {
     @apply bg-slate-50 text-slate-900 antialiased;
   }
+
+  input:focus,
+  textarea:focus,
+  select:focus {
+    outline: none;
+    box-shadow: none;
+    border-color: rgb(59 130 246);
+    background-color: white;
+  }
   
   /* Hide scrollbars globally */
   * {
@@ -33,6 +42,26 @@
   @apply max-w-md mx-auto min-h-screen bg-white shadow-xl relative overflow-hidden flex flex-col transition-colors duration-300;
 }
 
+.page-gutters {
+  padding-left: 20px;
+  padding-right: 20px;
+}
+
+.screen-shell {
+  padding-left: 20px;
+  padding-right: 20px;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 20px);
+  padding-bottom: 20px;
+}
+
+.safe-area-top {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
+}
+
 .safe-area-bottom {
   padding-bottom: env(safe-area-inset-bottom, 24px);
+}
+
+.bottom-tabbar {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
 }

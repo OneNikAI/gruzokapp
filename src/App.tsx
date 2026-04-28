@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { Component, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { 
   BarChart, 
   Bar, 
@@ -20,6 +20,7 @@ import {
   PlusCircle, 
   MapPin, 
   Clock, 
+  Calendar,
   ChevronRight, 
   Star, 
   ShieldCheck, 
@@ -53,13 +54,14 @@ import {
   AlertTriangle,
   Info,
   UserMinus,
-  Copy
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents, Circle, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { chatService, Chat, Message, Timestamp, checkUserExists, collection, addDoc, serverTimestamp, db, handleFirestoreError, OperationType, authService, orderService, onSnapshot, doc, getDoc, getDocs, updateDoc, query, where, orderBy, limit, normalizePhone } from './firebase';
+import { chatService, Chat, Message, Timestamp, collection, addDoc, serverTimestamp, db, handleFirestoreError, OperationType, authService, orderService, onSnapshot, doc, getDoc, getDocs, updateDoc, setDoc, query, where, orderBy, limit, normalizePhone } from './firebase';
 import { auth } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 
@@ -99,10 +101,14 @@ interface PortfolioItem {
 interface Review {
   id: string;
   author: string;
+  authorId?: string;
   rating: number;
   text: string;
   date: string;
   avatar?: string;
+  orderId?: string;
+  targetId?: string;
+  targetRole?: UserRole;
 }
 
 interface User {
@@ -112,11 +118,17 @@ interface User {
   role: UserRole;
   avatar: string;
   rating: number;
+  lat?: number;
+  lng?: number;
+  lastLocationAt?: any;
   skills?: string[];
   experience?: string;
   bio?: string;
   portfolio?: PortfolioItem[];
   reviews?: Review[];
+  reviewsCount?: number;
+  completedJobs?: number;
+  responseTime?: string;
 }
 
 interface AssignedWorker {
@@ -142,6 +154,7 @@ interface Order {
   status: 'pending_negotiation' | 'open' | 'in-progress' | 'completed';
   customerReviewed?: boolean;
   workerReviewed?: boolean;
+  reviews?: Review[];
   time?: string;
   date?: string;
   workersCount?: number;
@@ -150,6 +163,12 @@ interface Order {
   lat?: number;
   lng?: number;
   statusHistory?: StatusHistoryEntry[];
+  workerLiveLocation?: {
+    lat: number;
+    lng: number;
+    updatedAt?: string;
+    workerId?: string;
+  };
 }
 
 interface StatusHistoryEntry {
@@ -203,10 +222,92 @@ const TRANSLATIONS = {
     helpFaq: "Помощь и FAQ",
     contactUs: "Связаться с нами",
     aboutApp: "О приложении",
+    supportChat: "Чат с поддержкой",
+    writeSupport: "Написать в поддержку",
+    noFaqAnswer: "Не нашли ответ на свой вопрос?",
+    version: "Версия",
+    copyright: "Все права защищены.",
     save: "Сохранить",
     cancel: "Отмена",
     name: "Имя",
     phone: "Телефон",
+    login: "Вход",
+    chats: "Чаты",
+    profile: "Профиль",
+    home: "Главная",
+    orders: "Заказы",
+    hello: "Привет",
+    needHelp: "Нужна помощь с грузом или ремонтом?",
+    yourOrders: "Ваши заказы",
+    availableOrders: "Доступные заказы",
+    noOrders: "Заказов не найдено",
+    all: "Все",
+    open: "Открытые",
+    inProgress: "В работе",
+    completed: "Завершенные",
+    category: "Категория",
+    allCategories: "Все категории",
+    loaders: "Грузчики",
+    moving: "Переезд",
+    assembly: "Сборка",
+    other: "Разное",
+    supportTitle: "Поддержка",
+    messages: "Сообщения",
+    noChats: "Нет активных чатов",
+    startChat: "Начните общение...",
+    chat: "Чат",
+    messagePlaceholder: "Сообщение...",
+    aboutMe: "О себе",
+    skills: "Навыки",
+    noSkills: "Навыки не указаны",
+    experience: "Опыт работы",
+    noExperience: "Опыт работы не указан",
+    contactData: "Контактные данные",
+    notSpecified: "Не указан",
+    orderHistory: "История заказов",
+    logout: "Выйти",
+    myWorks: "Мои работы",
+    upload: "Загрузить",
+    uploading: "Загрузка",
+    add: "Добавить",
+    reviews: "Отзывы",
+    noReviews: "Отзывов пока нет",
+    editProfile: "Редактировать профиль",
+    saveChanges: "Сохранить изменения",
+    newOrder: "Новый заказ",
+    whatToDo: "Что нужно сделать? *",
+    titleExample: "Например: Перевезти диван",
+    address: "Адрес *",
+    addressPlaceholder: "Улица, дом, квартира",
+    searchingAddress: "Ищем адрес...",
+    mapHint: "Кликните на карту для выбора адреса",
+    date: "Дата",
+    time: "Время",
+    description: "Описание",
+    descriptionPlaceholder: "Опишите детали, этаж, наличие лифта...",
+    payment: "Оплата (₽)",
+    paymentMethod: "Способ оплаты",
+    cash: "Наличные",
+    card: "Карта",
+    sbp: "СБП",
+    publishOrder: "Опубликовать заказ",
+    publishing: "Публикуем...",
+    resetFilters: "Сбросить фильтры",
+    writeTitleError: "Пожалуйста, введите название заказа",
+    shortTitleError: "Название слишком короткое (минимум 5 символов)",
+    addressError: "Пожалуйста, укажите адрес выполнения",
+    budgetError: "Бюджет должен быть положительным числом",
+    workersError: "Минимум 1 грузчик",
+    createOrderError: "Не удалось создать заказ. Проверьте интернет и авторизацию, затем попробуйте еще раз.",
+    orderDetails: "Детали заказа",
+    statusOpen: "Открыт",
+    statusPending: "На согласовании",
+    statusInProgress: "В работе",
+    statusCompleted: "Завершен",
+    workerAssigned: "Назначен",
+    onWay: "В пути",
+    atWork: "На месте",
+    finished: "Закончил",
     aboutText: "ГрузОК — это современная платформа для быстрого поиска грузчиков и разнорабочих. Мы помогаем заказчикам и исполнителям находить друг друга.",
     faq: [
       { q: "Как заказать услугу?", a: "Нажмите на кнопку 'Создать заказ' на главной странице и выберите нужную категорию." },
@@ -225,10 +326,92 @@ const TRANSLATIONS = {
     helpFaq: "Help & FAQ",
     contactUs: "Contact Us",
     aboutApp: "About App",
+    supportChat: "Support Chat",
+    writeSupport: "Contact Support",
+    noFaqAnswer: "Did not find an answer?",
+    version: "Version",
+    copyright: "All rights reserved.",
     save: "Save",
     cancel: "Cancel",
     name: "Name",
     phone: "Phone",
+    login: "Login",
+    chats: "Chats",
+    profile: "Profile",
+    home: "Home",
+    orders: "Orders",
+    hello: "Hi",
+    needHelp: "Need help with moving or heavy work?",
+    yourOrders: "Your orders",
+    availableOrders: "Available orders",
+    noOrders: "No orders found",
+    all: "All",
+    open: "Open",
+    inProgress: "In progress",
+    completed: "Completed",
+    category: "Category",
+    allCategories: "All categories",
+    loaders: "Loaders",
+    moving: "Moving",
+    assembly: "Assembly",
+    other: "Other",
+    supportTitle: "Support",
+    messages: "Messages",
+    noChats: "No active chats",
+    startChat: "Start chatting...",
+    chat: "Chat",
+    messagePlaceholder: "Message...",
+    aboutMe: "About me",
+    skills: "Skills",
+    noSkills: "No skills specified",
+    experience: "Work experience",
+    noExperience: "No work experience specified",
+    contactData: "Contact details",
+    notSpecified: "Not specified",
+    orderHistory: "Order history",
+    logout: "Log out",
+    myWorks: "My work",
+    upload: "Upload",
+    uploading: "Uploading",
+    add: "Add",
+    reviews: "Reviews",
+    noReviews: "No reviews yet",
+    editProfile: "Edit profile",
+    saveChanges: "Save changes",
+    newOrder: "New order",
+    whatToDo: "What needs to be done? *",
+    titleExample: "For example: Move a sofa",
+    address: "Address *",
+    addressPlaceholder: "Street, building, apartment",
+    searchingAddress: "Searching address...",
+    mapHint: "Tap the map to choose an address",
+    date: "Date",
+    time: "Time",
+    description: "Description",
+    descriptionPlaceholder: "Describe details, floor, elevator availability...",
+    payment: "Payment (₽)",
+    paymentMethod: "Payment method",
+    cash: "Cash",
+    card: "Card",
+    sbp: "SBP",
+    publishOrder: "Publish order",
+    publishing: "Publishing...",
+    resetFilters: "Reset filters",
+    writeTitleError: "Please enter an order title",
+    shortTitleError: "Title is too short (minimum 5 characters)",
+    addressError: "Please enter the job address",
+    budgetError: "Budget must be a positive number",
+    workersError: "Minimum 1 loader",
+    createOrderError: "Could not create the order. Check internet and authorization, then try again.",
+    orderDetails: "Order details",
+    statusOpen: "Open",
+    statusPending: "Pending approval",
+    statusInProgress: "In progress",
+    statusCompleted: "Completed",
+    workerAssigned: "Assigned",
+    onWay: "On the way",
+    atWork: "On site",
+    finished: "Finished",
     aboutText: "GruzOK is a modern platform for quickly finding loaders and handymen. We help customers and performers find each other.",
     faq: [
       { q: "How to order a service?", a: "Click on the 'Create Order' button on the main page and select the desired category." },
@@ -236,6 +419,30 @@ const TRANSLATIONS = {
     ]
   }
 };
+
+type AppLang = keyof typeof TRANSLATIONS;
+type AppText = typeof TRANSLATIONS.ru;
+
+const getCategoryLabel = (category: string, t: AppText) => ({
+  'Грузчики': t.loaders,
+  'Переезд': t.moving,
+  'Сборка': t.assembly,
+  'Разное': t.other,
+  all: t.all,
+}[category] || category);
+
+const getStatusLabel = (status: string, t: AppText) => ({
+  pending_negotiation: t.statusPending,
+  open: t.statusOpen,
+  'in-progress': t.statusInProgress,
+  completed: t.statusCompleted,
+}[status] || status);
+
+const getPaymentMethodLabel = (method: string, t: AppText) => ({
+  'Наличные': t.cash,
+  'Карта': t.card,
+  'СБП': t.sbp,
+}[method] || method);
 
 // Logo Component
 const Logo = ({ className = "", size = 40, onlyArrow = false, textClassName = "text-2xl" }: { className?: string, size?: number, onlyArrow?: boolean, textClassName?: string }) => (
@@ -260,246 +467,20 @@ const Logo = ({ className = "", size = 40, onlyArrow = false, textClassName = "t
 );
 
 // Mock Data
-const MOCK_USER_CUSTOMER: User = {
-  id: 'u1',
-  name: 'Александр',
-  role: 'customer',
-  avatar: 'https://picsum.photos/seed/alex/100',
-  rating: 4.9,
-  reviews: [
-    { id: 'r1', author: 'Сергей', rating: 5, text: 'Отличный заказчик, всё четко и вовремя.', date: '20.03.2026', avatar: 'https://picsum.photos/seed/serg/100' },
-    { id: 'r2', author: 'Дмитрий', rating: 4, text: 'Всё хорошо, но пришлось немного подождать на месте.', date: '15.03.2026', avatar: 'https://picsum.photos/seed/dmit/100' },
-  ]
-};
 
-const MOCK_USER_WORKER: User = {
-  id: 'u2',
-  name: 'Иван',
-  role: 'worker',
-  avatar: 'https://picsum.photos/seed/ivan/100',
-  rating: 4.8,
-  skills: ['Грузоперевозки', 'Сборка мебели', 'Такелажные работы'],
-  experience: 'Более 5 лет опыта в сфере переездов и сборки мебели. Есть свой инструмент и грузовой автомобиль.',
-  portfolio: [
-    { type: 'image', url: 'https://picsum.photos/seed/port1/600/400' },
-    { type: 'image', url: 'https://picsum.photos/seed/port2/600/400' },
-    { type: 'video', url: 'https://www.w3schools.com/html/mov_bbb.mp4', thumbnail: 'https://picsum.photos/seed/vid1/600/400' },
-  ],
-  reviews: [
-    { id: 'r3', author: 'Анна', rating: 5, text: 'Иван — настоящий профессионал! Перевезли всё быстро и аккуратно.', date: '22.03.2026', avatar: 'https://picsum.photos/seed/anna/100' },
-    { id: 'r4', author: 'Михаил', rating: 5, text: 'Очень доволен работой. Рекомендую!', date: '18.03.2026', avatar: 'https://picsum.photos/seed/mikh/100' },
-  ]
+const SUPPORT_PROFILE = {
+  id: 'support',
+  name: 'Диспетчер (Поддержка)',
+  avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=support&backgroundColor=b6e3f4',
+  rating: 0,
+  reviewsCount: 0,
+  bio: 'Официальная служба поддержки ГрузОК. Мы работаем 24/7.',
+  portfolio: [],
+  reviews: [],
+  responseTime: '1 мин',
+  isOnline: true,
+  availability: 'На связи'
 };
-
-const MOCK_USER_DISPATCHER: User = {
-  id: 'u4',
-  name: 'Алексей',
-  role: 'dispatcher',
-  avatar: 'https://picsum.photos/seed/dispatcher/100',
-  rating: 5.0
-};
-
-const INITIAL_ORDERS: Order[] = [
-  {
-    id: 'o1',
-    title: 'Перевезти диван и 2 кресла',
-    description: 'Нужно перевезти мебель из квартиры на 3 этаже (есть лифт) в загородный дом. Помощь с погрузкой обязательна.',
-    budget: 2000,
-    negotiatedBudget: 2500,
-    commission: 500,
-    address: 'ул. Ленина, 45',
-    category: 'Переезд',
-    customerId: 'u1',
-    status: 'open',
-    time: '18:00',
-    date: '24.03.2026',
-    workersCount: 2,
-    paymentMethod: 'Наличные',
-    distance: 3.2,
-    lat: 55.7558,
-    lng: 37.6173,
-    assignedWorkers: [
-      { id: 'w1', name: 'Алексей', avatar: 'https://picsum.photos/seed/w1/200', status: 'on-way' },
-      { id: 'w2', name: 'Михаил', avatar: 'https://picsum.photos/seed/w2/200', status: 'assigned' }
-    ]
-  },
-  {
-    id: 'o2',
-    title: 'Разгрузить фуру со стройматериалами',
-    description: 'Требуется 2 человека на 3 часа работы. Разгрузка ГКЛ и мешков со смесью.',
-    budget: 2400,
-    negotiatedBudget: 3000,
-    commission: 600,
-    address: 'пр. Мира, 12',
-    category: 'Грузчики',
-    customerId: 'u3',
-    status: 'in-progress',
-    time: '10:00',
-    date: '25.03.2026',
-    workersCount: 2,
-    paymentMethod: 'Карта',
-    distance: 1.5,
-    lat: 55.7833,
-    lng: 37.6333,
-    assignedWorkers: [
-      { id: 'w3', name: 'Сергей', avatar: 'https://picsum.photos/seed/w3/200', status: 'at-work' },
-      { id: 'w4', name: 'Дмитрий', avatar: 'https://picsum.photos/seed/w4/200', status: 'at-work' }
-    ],
-    statusHistory: [
-      { status: 'open', timestamp: '2026-03-25T08:00:00Z', changedBy: 'dispatcher' },
-      { status: 'in-progress', timestamp: '2026-03-25T10:00:00Z', changedBy: 'dispatcher' },
-      { status: 'at-work', timestamp: '2026-03-25T10:15:00Z', changedBy: 'worker', workerName: 'Сергей' },
-      { status: 'at-work', timestamp: '2026-03-25T10:20:00Z', changedBy: 'worker', workerName: 'Дмитрий' }
-    ]
-  },
-  {
-    id: 'o3',
-    title: 'Сборка шкафа ПАКС',
-    description: 'Нужно собрать 3 секции шкафа ПАКС. Инструмент есть.',
-    budget: 4500, // This is initial budget from customer
-    address: 'ул. Гагарина, 10',
-    category: 'Сборка',
-    customerId: 'u1',
-    status: 'pending_negotiation',
-    time: '14:00',
-    date: '26.03.2026',
-    workersCount: 1,
-    paymentMethod: 'Наличные',
-    distance: 8.4,
-    lat: 55.7000,
-    lng: 37.5000,
-    candidates: ['u2', 'u5'],
-    statusHistory: [
-      { status: 'pending_negotiation', timestamp: '2026-03-26T12:00:00Z', changedBy: 'customer' }
-    ]
-  },
-  {
-    id: 'o4',
-    title: 'Помощь на даче',
-    description: 'Нужно вскопать грядки и перенести дрова.',
-    budget: 1200,
-    negotiatedBudget: 1500,
-    commission: 300,
-    address: 'СНТ Рассвет',
-    category: 'Разное',
-    customerId: 'u3',
-    workerId: 'u2',
-    status: 'completed',
-    time: '09:00',
-    date: '20.03.2026',
-    workersCount: 1,
-    paymentMethod: 'Наличные',
-    distance: 25.0,
-    lat: 55.9000,
-    lng: 37.8000,
-    statusHistory: [
-      { status: 'open', timestamp: '2026-03-20T08:00:00Z', changedBy: 'dispatcher' },
-      { status: 'in-progress', timestamp: '2026-03-20T09:00:00Z', changedBy: 'dispatcher' },
-      { status: 'at-work', timestamp: '2026-03-20T09:10:00Z', changedBy: 'worker', workerName: 'Иван' },
-      { status: 'finished', timestamp: '2026-03-20T12:00:00Z', changedBy: 'worker', workerName: 'Иван' },
-      { status: 'completed', timestamp: '2026-03-20T12:15:00Z', changedBy: 'dispatcher' }
-    ]
-  },
-  {
-    id: 'o5',
-    title: 'Сборка кухонного гарнитура',
-    description: 'Нужна сборка кухни IKEA 3 метра. Все инструменты есть.',
-    budget: 4000,
-    negotiatedBudget: 5000,
-    commission: 1000,
-    address: 'ул. Гагарина, 10',
-    category: 'Сборка',
-    customerId: 'u1',
-    workerId: 'u2',
-    status: 'completed',
-    time: '12:00',
-    date: '18.03.2026',
-    workersCount: 1,
-    paymentMethod: 'СБП',
-    lat: 55.7000,
-    lng: 37.5000
-  }
-];
-
-const MOCK_WORKER_PROFILES: Record<string, WorkerProfileData> = {
-  'u2': {
-    id: 'u2',
-    name: 'Иван Петров',
-    avatar: 'https://picsum.photos/seed/worker1/200',
-    rating: 4.9,
-    reviewsCount: 124,
-    bio: 'Опытный грузчик и сборщик мебели. Работаю аккуратно, есть свой инструмент. Пунктуальность гарантирую.',
-    portfolio: [
-      'https://picsum.photos/seed/p1/300/200',
-      'https://picsum.photos/seed/p2/300/200',
-      'https://picsum.photos/seed/p3/300/200'
-    ],
-    reviews: [
-      { id: 'r1', author: 'Алексей', rating: 5, text: 'Отличный мастер! Собрал шкаф очень быстро.', date: '20.03.2026' },
-      { id: 'r2', author: 'Мария', rating: 4, text: 'Приехал вовремя, помог с переездом. Рекомендую.', date: '15.03.2026' }
-    ],
-    responseTime: '15 мин',
-    isOnline: true,
-    availability: 'Свободен до 20:00'
-  },
-  'u4': {
-    id: 'u4',
-    name: 'Сергей Волков',
-    avatar: 'https://picsum.photos/seed/worker2/200',
-    rating: 4.7,
-    reviewsCount: 89,
-    bio: 'Занимаюсь переездами более 5 лет. Крепкий, выносливый. Есть напарник при необходимости.',
-    portfolio: [
-      'https://picsum.photos/seed/p4/300/200',
-      'https://picsum.photos/seed/p5/300/200'
-    ],
-    reviews: [
-      { id: 'r3', author: 'Дмитрий', rating: 5, text: 'Все супер, перевезли пианино без царапин.', date: '10.03.2026' }
-    ],
-    responseTime: '30 мин',
-    isOnline: false,
-    availability: 'Занят до завтра',
-    skills: ['Грузчик', 'Сборка мебели', 'Такелажные работы'],
-    experience: 'Более 5 лет в сфере грузоперевозок. Работал в крупных мувинговых компаниях.'
-  },
-  'u5': {
-    id: 'u5',
-    name: 'Андрей Соколов',
-    avatar: 'https://picsum.photos/seed/worker3/200',
-    rating: 4.5,
-    reviewsCount: 56,
-    bio: 'Разнорабочий. Помогу на даче, разгружу фуру, вынесу мусор. Работаю на совесть.',
-    portfolio: [
-      'https://picsum.photos/seed/p6/300/200'
-    ],
-    reviews: [
-      { id: 'r4', author: 'Елена', rating: 4, text: 'Хороший парень, помог вскопать огород.', date: '05.03.2026' }
-    ],
-    responseTime: '1 час',
-    isOnline: true,
-    availability: 'Свободен сейчас',
-    skills: ['Разнорабочий', 'Демонтаж', 'Уборка мусора'],
-    experience: 'Опыт работы на стройках и складах. Готов к тяжелому физическому труду.'
-  },
-  'support': {
-    id: 'support',
-    name: 'Диспетчер (Поддержка)',
-    avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=support&backgroundColor=b6e3f4',
-    rating: 5.0,
-    reviewsCount: 999,
-    bio: 'Официальная служба поддержки ГрузОК. Мы работаем 24/7, чтобы помочь вам с любыми вопросами.',
-    portfolio: [],
-    reviews: [],
-    responseTime: '1 мин',
-    isOnline: true,
-    availability: 'На связи'
-  }
-};
-const MOCK_CHATS = [
-  { id: 'support', name: 'Служба поддержки', lastMsg: 'Здравствуйте! Чем мы можем вам помочь?', time: 'Сейчас', avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=support&backgroundColor=b6e3f4' },
-  { id: 'ch1', name: 'Дмитрий (Грузчик)', lastMsg: 'Буду через 15 минут', time: '12:45', avatar: 'https://picsum.photos/seed/dima/100' },
-  { id: 'ch2', name: 'Сергей (Сборка)', lastMsg: 'Инструменты взял', time: 'Вчера', avatar: 'https://picsum.photos/seed/serg/100' },
-];
 
 interface Notification {
   id: string;
@@ -510,36 +491,6 @@ interface Notification {
   type: 'order' | 'payment' | 'system' | 'chat';
   orderId?: string;
 }
-
-const MOCK_NOTIFICATIONS: Notification[] = [
-  {
-    id: 'n1',
-    title: 'Новый заказ',
-    message: 'Появился новый заказ в категории "Переезд" рядом с вами.',
-    time: '5 мин. назад',
-    isRead: false,
-    type: 'order',
-    orderId: '1'
-  },
-  {
-    id: 'n2',
-    title: 'Оплата получена',
-    message: 'Ваш баланс пополнен на 1500 ₽ за заказ #o1.',
-    time: '2 ч. назад',
-    isRead: true,
-    type: 'payment',
-    orderId: '2'
-  },
-  {
-    id: 'n3',
-    title: 'Сообщение',
-    message: 'Заказчик Иван Петров отправил вам сообщение.',
-    time: '1 дн. назад',
-    isRead: true,
-    type: 'chat',
-    orderId: '3'
-  }
-];
 
 // Utility Functions
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -555,17 +506,137 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * c;
 };
 
+const getReviewsCount = (profile: any) => {
+  if (!profile) return 0;
+  if (typeof profile.reviewsCount === 'number') return profile.reviewsCount;
+  if (Array.isArray(profile.reviews)) return profile.reviews.length;
+  if (typeof profile.reviews === 'number') return profile.reviews;
+  return 0;
+};
+
+const NOTIFICATION_CHANNEL_ID = 'gruzok-default';
+
+const setupDeviceNotifications = async () => {
+  try {
+    const { LocalNotifications } = await import('@capacitor/local-notifications');
+    await (LocalNotifications as any).createChannel?.({
+      id: NOTIFICATION_CHANNEL_ID,
+      name: 'GruzOK',
+      description: 'Order, chat, and support notifications',
+      importance: 4,
+      visibility: 1,
+    });
+
+    const permissions = await LocalNotifications.checkPermissions();
+    if (permissions.display !== 'granted') {
+      await LocalNotifications.requestPermissions();
+    }
+  } catch (error) {
+    if ('Notification' in window && window.Notification.permission === 'default') {
+      await window.Notification.requestPermission();
+    }
+  }
+};
+
+const showDeviceNotification = async (title: string, body: string) => {
+  try {
+    const { LocalNotifications } = await import('@capacitor/local-notifications');
+    const permissions = await LocalNotifications.checkPermissions();
+    const displayPermission = permissions.display === 'granted'
+      ? permissions.display
+      : (await LocalNotifications.requestPermissions()).display;
+
+    if (displayPermission === 'granted') {
+      await LocalNotifications.schedule({
+        notifications: [{
+          id: Math.floor(Date.now() % 2147483647),
+          title,
+          body,
+          channelId: NOTIFICATION_CHANNEL_ID,
+          schedule: { at: new Date(Date.now() + 250) },
+        }]
+      });
+      return;
+    }
+  } catch (error) {
+    console.warn('Capacitor local notification failed, falling back to browser API:', error);
+  }
+
+  if ('Notification' in window && window.Notification.permission === 'granted') {
+    new window.Notification(title, {
+      body,
+      icon: 'https://ais-dev-ujdnun7ulual234fmcddyi-216250874567.europe-west1.run.app/favicon.ico'
+    });
+  }
+};
+
+const registerPushNotifications = async (userId: string) => {
+  try {
+    const { PushNotifications } = await import('@capacitor/push-notifications');
+    const permissions = await PushNotifications.checkPermissions();
+    const receivePermission = permissions.receive === 'granted'
+      ? permissions.receive
+      : (await PushNotifications.requestPermissions()).receive;
+
+    if (receivePermission !== 'granted') {
+      await setDoc(doc(db, 'users', userId), {
+        pushEnabled: false,
+        pushPermission: receivePermission,
+        pushPermissionUpdatedAt: serverTimestamp(),
+      }, { merge: true });
+      return () => {};
+    }
+
+    const registrationHandle = await PushNotifications.addListener('registration', async (token) => {
+      try {
+        await setDoc(doc(db, 'users', userId), {
+          fcmToken: token.value,
+          pushEnabled: true,
+          pushPermission: 'granted',
+          fcmTokenUpdatedAt: serverTimestamp(),
+        }, { merge: true });
+      } catch (error) {
+        console.error('Error saving FCM token:', error);
+      }
+    });
+
+    const registrationErrorHandle = await PushNotifications.addListener('registrationError', (error) => {
+      console.error('Push registration error:', error);
+    });
+
+    const receivedHandle = await PushNotifications.addListener('pushNotificationReceived', (notification) => {
+      if (notification.title || notification.body) {
+        void showDeviceNotification(notification.title || 'GruzOK', notification.body || '');
+      }
+    });
+
+    const actionHandle = await PushNotifications.addListener('pushNotificationActionPerformed', (event) => {
+      console.info('Push notification action:', event);
+    });
+
+    await PushNotifications.register();
+
+    return () => {
+      registrationHandle.remove();
+      registrationErrorHandle.remove();
+      receivedHandle.remove();
+      actionHandle.remove();
+    };
+  } catch (error) {
+    console.warn('Push notifications are not available in this environment:', error);
+    return () => {};
+  }
+};
+
 // Sub-components
 interface HeaderProps {
   title: string;
   showBack?: boolean;
   onBack?: () => void;
-  role?: UserRole;
-  setRole?: (role: UserRole) => void;
 }
 
-const Header = ({ title, showBack = false, onBack, role, setRole }: HeaderProps) => (
-  <div className="px-6 py-4 flex items-center justify-between border-b border-slate-100 bg-white sticky top-0 z-10 transition-colors">
+const Header = ({ title, showBack = false, onBack }: HeaderProps) => (
+  <div className="page-gutters safe-area-top py-4 flex items-center justify-between border-b border-slate-100 bg-white sticky top-0 z-10 transition-colors">
     <div className="flex items-center gap-3">
       {showBack && (
         <button onClick={onBack} className="p-1 -ml-2 text-slate-900">
@@ -573,16 +644,6 @@ const Header = ({ title, showBack = false, onBack, role, setRole }: HeaderProps)
         </button>
       )}
       <h1 className="text-xl font-bold tracking-tight text-slate-900">{title}</h1>
-    </div>
-    <div className="flex items-center gap-3">
-      {!showBack && setRole && role && (
-        <button 
-          onClick={() => setRole(role === 'customer' ? 'worker' : 'customer')}
-          className="text-xs font-semibold px-3 py-1 bg-slate-100 rounded-full text-slate-600 hover:bg-slate-200 transition-colors"
-        >
-          {role === 'customer' ? 'Я Исполнитель' : 'Я Заказчик'}
-        </button>
-      )}
     </div>
   </div>
 );
@@ -595,12 +656,17 @@ interface OrderCardProps {
   onQuickApply?: (orderId: string) => void;
   hideStatus?: boolean;
   role?: UserRole;
+  currentUserId?: string;
+  lang?: AppLang;
 }
 
-const OrderCard: React.FC<OrderCardProps> = ({ order, workers = [], onClick, onWorkerClick, onQuickApply, hideStatus, role }) => {
-  const displayWorkers = workers.length > 0 ? workers : Object.values(MOCK_WORKER_PROFILES);
+const OrderCard: React.FC<OrderCardProps> = ({ order, workers = [], onClick, onWorkerClick, onQuickApply, hideStatus, role, currentUserId, lang = 'ru' }) => {
+  const t = TRANSLATIONS[lang];
+  const displayWorkers = workers.filter(w => w.role === 'worker');
   const workersMap = displayWorkers.reduce((acc, w) => {
-    acc[w.id] = w;
+    const normalizedWorker = { ...w, phone: w.phone || w.phoneNumber || w.contactPhone || '' };
+    acc[w.id] = normalizedWorker;
+    if (w.uid) acc[w.uid] = normalizedWorker;
     return acc;
   }, {} as Record<string, any>);
 
@@ -612,20 +678,18 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, workers = [], onClick, onW
   };
 
   const statusLabels: Record<Order['status'], string> = {
-    'pending_negotiation': 'На согласовании',
-    'open': 'Открыт',
-    'in-progress': 'В работе',
-    'completed': 'Завершен'
+    'pending_negotiation': t.statusPending,
+    'open': t.statusOpen,
+    'in-progress': t.statusInProgress,
+    'completed': t.statusCompleted
   };
 
   return (
     <motion.div 
-      layoutId={order.id}
       initial={{ opacity: 0, y: 10, scale: 0.95 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       onClick={() => onClick(order)}
-      whileHover={{ 
-        scale: 1.02, 
+      whileHover={{  
         boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
         zIndex: 10
       }}
@@ -636,12 +700,12 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, workers = [], onClick, onW
         damping: 17,
         opacity: { duration: 0.3 }
       }}
-      className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm mb-4 cursor-pointer transition-all relative overflow-hidden"
+      className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm mb-4 cursor-pointer transition-all relative"
     >
       <div className="flex justify-between items-start mb-2 gap-4">
         <div className="flex flex-wrap gap-2 flex-1">
           <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
-            {order.category}
+            {getCategoryLabel(order.category, t)}
           </span>
           {!hideStatus && (
             <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${statusColors[order.status]}`}>
@@ -707,7 +771,7 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, workers = [], onClick, onW
           {order.distance !== undefined && (
             <div className="flex items-center gap-1">
               <Navigation size={14} />
-              <span>{order.distance} км</span>
+              <span>{order.distance} {lang === 'en' ? 'km' : 'км'}</span>
             </div>
           )}
         </div>
@@ -716,11 +780,17 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, workers = [], onClick, onW
           <button 
             onClick={(e) => {
               e.stopPropagation();
-              onQuickApply(order.id);
+              if (!order.candidates?.includes(currentUserId || '')) {
+                onQuickApply(order.id);
+              }
             }}
-            className="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md active:scale-95 transition-all"
+            className={`px-4 py-2 rounded-xl text-xs font-bold shadow-md active:scale-95 transition-all ${
+              order.candidates?.includes(currentUserId || '')
+                ? 'bg-slate-100 text-slate-400 cursor-default'
+                : 'bg-blue-600 text-white'
+            }`}
           >
-            Откликнуться
+            {order.candidates?.includes(currentUserId || '') ? (lang === 'en' ? 'Applied' : 'Откликнулся') : (lang === 'en' ? 'Apply' : 'Откликнуться')}
           </button>
         )}
       </div>
@@ -734,27 +804,30 @@ interface OnboardingProps {
 
 // Phone Mask Helper
 const formatPhoneNumber = (value: string) => {
-  if (!value) return value;
-  const phoneNumber = value.replace(/[^\d]/g, '');
-  const phoneNumberLength = phoneNumber.length;
-  if (phoneNumberLength < 2) return `+7`;
-  if (phoneNumberLength < 5) return `+7 (${phoneNumber.slice(1, 4)}`;
-  if (phoneNumberLength < 8) return `+7 (${phoneNumber.slice(1, 4)}) ${phoneNumber.slice(4, 7)}`;
-  return `+7 (${phoneNumber.slice(1, 4)}) ${phoneNumber.slice(4, 7)}-${phoneNumber.slice(7, 9)}-${phoneNumber.slice(9, 11)}`;
+  let digits = value.replace(/\D/g, '');
+  if (!digits) return '';
+
+  if (digits.startsWith('8')) {
+    digits = `7${digits.slice(1)}`;
+  }
+
+  const nationalNumber = (digits.startsWith('7') ? digits.slice(1) : digits).slice(0, 10);
+  if (!nationalNumber) return '';
+  if (nationalNumber.length <= 3) return `+7 (${nationalNumber}`;
+  if (nationalNumber.length <= 6) return `+7 (${nationalNumber.slice(0, 3)}) ${nationalNumber.slice(3)}`;
+  if (nationalNumber.length <= 8) return `+7 (${nationalNumber.slice(0, 3)}) ${nationalNumber.slice(3, 6)}-${nationalNumber.slice(6)}`;
+  return `+7 (${nationalNumber.slice(0, 3)}) ${nationalNumber.slice(3, 6)}-${nationalNumber.slice(6, 8)}-${nationalNumber.slice(8)}`;
 };
 
 const PhoneInput = ({ value, onChange, className }: { value: string, onChange: (val: string) => void, className?: string }) => {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const formattedValue = formatPhoneNumber(e.target.value);
-    if (formattedValue.length <= 18) {
-      onChange(formattedValue);
-    }
+    onChange(formatPhoneNumber(e.target.value));
   };
 
   return (
     <input 
       type="tel" 
-      value={value}
+      value={formatPhoneNumber(value)}
       onChange={handleChange}
       placeholder="+7 (999) 999-99-99" 
       className={className || "w-full p-4 bg-slate-50 border border-slate-100 text-slate-900 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 transition-colors"} 
@@ -762,146 +835,193 @@ const PhoneInput = ({ value, onChange, className }: { value: string, onChange: (
   );
 };
 
-// SMS Verification Component
-const SMSVerification = ({ onVerify, onBack, phone }: { onVerify: () => void, onBack: () => void, phone: string }) => {
-  const [code, setCode] = useState(['', '', '', '']);
-  const [error, setError] = useState<string | null>(null);
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [demoCode, setDemoCode] = useState<string | null>(null);
-  const inputs = useRef<(HTMLInputElement | null)[]>([]);
+const formatDateInput = (value: string) => {
+  const digits = value.replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}.${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}.${digits.slice(2, 4)}.${digits.slice(4)}`;
+};
 
-  useEffect(() => {
-    // For demo purposes, we'll show the code in the UI
-    const fetchCode = async () => {
-      try {
-        const sentCode = await authService.sendVerificationCode(phone);
-        setDemoCode(sentCode);
-      } catch (err) {
-        console.error("Error sending initial verification code:", err);
-        setError('Ошибка при отправке кода подтверждения');
+const formatTimeInput = (value: string) => {
+  const digits = value.replace(/\D/g, '').slice(0, 4);
+  if (digits.length <= 2) return digits;
+  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+};
+
+const isoDateToDisplay = (value: string) => {
+  if (!value) return '';
+  const [year, month, day] = value.split('-');
+  if (!year || !month || !day) return value;
+  return `${day}.${month}.${year}`;
+};
+
+const displayDateToIso = (value: string) => {
+  const parts = value.split('.');
+  if (parts.length !== 3) return '';
+  const [day, month, year] = parts;
+  if (day.length !== 2 || month.length !== 2 || year.length !== 4) return '';
+  return `${year}-${month}-${day}`;
+};
+
+const readFileAsDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result || ''));
+  reader.onerror = () => reject(reader.error);
+  reader.readAsDataURL(file);
+});
+
+const resizeImageFile = (file: File, maxSize = 1280, quality = 0.82) => new Promise<File>((resolve) => {
+  if (!file.type.startsWith('image/')) {
+    resolve(file);
+    return;
+  }
+
+  const image = new Image();
+  const objectUrl = URL.createObjectURL(file);
+
+  image.onload = () => {
+    URL.revokeObjectURL(objectUrl);
+    const ratio = Math.min(1, maxSize / Math.max(image.width, image.height));
+    const width = Math.max(1, Math.round(image.width * ratio));
+    const height = Math.max(1, Math.round(image.height * ratio));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext('2d')?.drawImage(image, 0, 0, width, height);
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        resolve(file);
+        return;
       }
-    };
-    fetchCode();
-  }, [phone]);
-
-  const handleChange = (index: number, value: string) => {
-    if (value.length > 1) value = value[value.length - 1];
-    const newCode = [...code];
-    newCode[index] = value;
-    setCode(newCode);
-    setError(null);
-
-    if (value && index < 3) {
-      inputs.current[index + 1]?.focus();
-    }
+      resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
+    }, 'image/jpeg', quality);
   };
 
-  const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
-    if (e.key === 'Backspace' && !code[index] && index > 0) {
-      inputs.current[index - 1]?.focus();
-    }
+  image.onerror = () => {
+    URL.revokeObjectURL(objectUrl);
+    resolve(file);
   };
 
-  const handleVerify = async () => {
-    setIsVerifying(true);
-    const inputCode = code.join('');
-    const isValid = await authService.verifyCode(phone, inputCode);
-    
-    if (isValid) {
-      onVerify();
-    } else {
-      setError('Неверный код подтверждения');
-      setIsVerifying(false);
+  image.src = objectUrl;
+});
+
+const PasswordField = ({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) => {
+  const [isVisible, setIsVisible] = useState(false);
+
+  return (
+    <div className="relative">
+      <input
+        type={isVisible ? 'text' : 'password'}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full p-4 pr-12 bg-slate-50 border border-slate-100 text-slate-900 rounded-2xl outline-none transition-colors"
+      />
+      <button
+        type="button"
+        onClick={() => setIsVisible((prev) => !prev)}
+        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 active:scale-95 transition-transform"
+        aria-label={isVisible ? 'Скрыть пароль' : 'Показать пароль'}
+      >
+        {isVisible ? <EyeOff size={18} /> : <Eye size={18} />}
+      </button>
+    </div>
+  );
+};
+
+const DateField = ({
+  value,
+  onChange,
+  placeholder,
+  className = '',
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  className?: string;
+}) => {
+  const pickerRef = useRef<HTMLInputElement>(null);
+  const openPicker = () => {
+    if (pickerRef.current?.showPicker) {
+      pickerRef.current.showPicker();
+      return;
     }
+    pickerRef.current?.click();
   };
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -20 }}
-      className="flex-1 flex flex-col"
-    >
-      <button onClick={onBack} className="mb-8 w-10 h-10 bg-slate-50 rounded-full flex items-center justify-center">
-        <ArrowLeft size={20} />
-      </button>
+    <div className="relative">
+      <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+      <input
+        type="text"
+        readOnly
+        value={value}
+        onClick={openPicker}
+        onFocus={openPicker}
+        placeholder={placeholder}
+        className={`w-full p-4 pl-12 bg-slate-50 border border-slate-100 rounded-2xl outline-none transition-colors cursor-pointer ${className}`}
+      />
+      <input
+        ref={pickerRef}
+        type="date"
+        tabIndex={-1}
+        value={displayDateToIso(value)}
+        onChange={(e) => onChange(isoDateToDisplay(e.target.value))}
+        className="absolute pointer-events-none opacity-0 w-0 h-0"
+      />
+    </div>
+  );
+};
 
-      <h2 className="text-3xl font-black mb-2 tracking-tight">Подтверждение</h2>
-      <p className="text-slate-500 mb-8">Мы отправили СМС с кодом на номер <span className="text-slate-900 font-bold">{phone}</span></p>
+const TimeField = ({
+  value,
+  onChange,
+  placeholder,
+  className = '',
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  className?: string;
+}) => {
+  const pickerRef = useRef<HTMLInputElement>(null);
+  const openPicker = () => {
+    if (pickerRef.current?.showPicker) {
+      pickerRef.current.showPicker();
+      return;
+    }
+    pickerRef.current?.click();
+  };
 
-      {demoCode && (
-        <motion.div 
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-8 p-5 bg-blue-600 rounded-3xl shadow-xl shadow-blue-200 flex items-center gap-4 relative overflow-hidden"
-        >
-          <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-full -mr-12 -mt-12" />
-          <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center text-white backdrop-blur-sm">
-            <Bell size={24} className="animate-bounce" />
-          </div>
-          <div className="flex-1">
-            <p className="text-[10px] font-black text-blue-100 uppercase tracking-[0.2em] mb-1">Код подтверждения</p>
-            <div className="flex items-center gap-3">
-              <span className="text-2xl font-black text-white tracking-widest">{demoCode}</span>
-              <button 
-                onClick={() => {
-                  navigator.clipboard.writeText(demoCode);
-                  alert('Код скопирован!');
-                }}
-                className="p-1.5 bg-white/20 rounded-lg text-white hover:bg-white/30 transition-colors"
-                title="Копировать код"
-              >
-                <Copy size={14} />
-              </button>
-            </div>
-          </div>
-        </motion.div>
-      )}
-
-      <div className="flex justify-between gap-4 mb-6">
-        {code.map((digit, i) => (
-          <input
-            key={i}
-            ref={el => inputs.current[i] = el}
-            type="number"
-            value={digit}
-            onChange={e => handleChange(i, e.target.value)}
-            onKeyDown={e => handleKeyDown(i, e)}
-            className={`w-16 h-20 text-center text-3xl font-black bg-slate-50 border-2 ${error ? 'border-red-200' : 'border-slate-100'} rounded-2xl focus:border-blue-600 focus:bg-blue-50 outline-none transition-all`}
-          />
-        ))}
-      </div>
-
-      {error && (
-        <p className="text-red-500 text-sm font-bold mb-6 text-center">{error}</p>
-      )}
-
-      <button 
-        onClick={handleVerify}
-        disabled={code.some(d => !d) || isVerifying}
-        className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold text-lg shadow-lg active:scale-95 transition-transform disabled:opacity-50 flex items-center justify-center gap-2"
-      >
-        {isVerifying && <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-        Подтвердить
-      </button>
-
-      <button 
-        onClick={async () => {
-          try {
-            const newCode = await authService.sendVerificationCode(phone);
-            setDemoCode(newCode);
-            setCode(['', '', '', '']);
-            setError(null);
-            // Show a small success feedback if needed
-          } catch (err: any) {
-            setError('Ошибка при отправке кода. Попробуйте позже.');
-          }
-        }}
-        className="mt-6 text-blue-600 font-bold text-sm active:scale-95 transition-transform"
-      >
-        Отправить код еще раз
-      </button>
-    </motion.div>
+  return (
+    <div className="relative">
+      <Clock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+      <input
+        type="text"
+        readOnly
+        value={value}
+        onClick={openPicker}
+        onFocus={openPicker}
+        placeholder={placeholder}
+        className={`w-full p-4 pl-12 bg-slate-50 border border-slate-100 rounded-2xl outline-none transition-colors cursor-pointer ${className}`}
+      />
+      <input
+        ref={pickerRef}
+        type="time"
+        tabIndex={-1}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="absolute pointer-events-none opacity-0 w-0 h-0"
+      />
+    </div>
   );
 };
 
@@ -914,7 +1034,7 @@ const Login = ({ onBack, onLogin }: { onBack: () => void, onLogin: (phone: strin
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 20 }}
-      className="absolute inset-0 bg-white z-50 flex flex-col p-8"
+      className="absolute inset-0 bg-white z-50 flex flex-col screen-shell"
     >
       <button onClick={onBack} className="mb-8 w-10 h-10 bg-slate-50 rounded-full flex items-center justify-center">
         <ArrowLeft size={20} />
@@ -931,12 +1051,10 @@ const Login = ({ onBack, onLogin }: { onBack: () => void, onLogin: (phone: strin
           </div>
           <div>
             <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Пароль</label>
-            <input 
-              type="password" 
+            <PasswordField
               value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="Минимум 6 символов" 
-              className="w-full p-4 bg-slate-50 border border-slate-100 text-slate-900 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 transition-colors" 
+              onChange={setPassword}
+              placeholder="Минимум 6 символов"
             />
           </div>
         </div>
@@ -967,11 +1085,7 @@ const Register = ({ onBack, onRegister }: { onBack: () => void, onRegister: (rol
     setError('');
     
     try {
-      const userExists = await checkUserExists(phone);
-      
-      if (userExists) {
-        setError('Пользователь с таким номером уже зарегистрирован');
-      } else if (password.length < 6) {
+      if (password.length < 6) {
         setError('Пароль должен быть не короче 6 символов');
       } else if (password !== passwordConfirm) {
         setError('Пароли не совпадают');
@@ -990,7 +1104,7 @@ const Register = ({ onBack, onRegister }: { onBack: () => void, onRegister: (rol
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 20 }}
-      className="absolute inset-0 bg-white z-50 flex flex-col p-8"
+      className="absolute inset-0 bg-white z-50 flex flex-col screen-shell"
     >
       <button onClick={onBack} className="mb-8 w-10 h-10 bg-slate-50 rounded-full flex items-center justify-center">
         <ArrowLeft size={20} />
@@ -1058,22 +1172,18 @@ const Register = ({ onBack, onRegister }: { onBack: () => void, onRegister: (rol
           </div>
           <div>
             <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Пароль</label>
-            <input 
-              type="password" 
+            <PasswordField
               value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="Минимум 6 символов" 
-              className="w-full p-4 bg-slate-50 border border-slate-100 text-slate-900 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 transition-colors" 
+              onChange={setPassword}
+              placeholder="Минимум 6 символов"
             />
           </div>
           <div>
             <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Повторите пароль</label>
-            <input 
-              type="password" 
+            <PasswordField
               value={passwordConfirm}
-              onChange={e => setPasswordConfirm(e.target.value)}
-              placeholder="Повторите пароль" 
-              className="w-full p-4 bg-slate-50 border border-slate-100 text-slate-900 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 transition-colors" 
+              onChange={setPasswordConfirm}
+              placeholder="Повторите пароль"
             />
           </div>
           {error && (
@@ -1101,7 +1211,7 @@ const RulesPage = ({ onAccept }: { onAccept: () => void }) => {
       initial={{ opacity: 0, x: '100%' }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: '100%' }}
-      className="absolute inset-0 bg-white z-[100] flex flex-col p-8"
+      className="absolute inset-0 bg-white z-[100] flex flex-col screen-shell"
     >
       <div className="flex-1 overflow-y-auto">
         <h2 className="text-3xl font-black mb-8 tracking-tight">Правила</h2>
@@ -1144,7 +1254,7 @@ const Onboarding = ({ onLogin, onRegister }: { onLogin: (phone: string, password
   const [showLogin, setShowLogin] = useState(false);
 
   return (
-    <div className="flex-1 flex flex-col p-8 items-center justify-center text-center">
+    <div className="flex-1 flex flex-col screen-shell items-center justify-center text-center">
       <AnimatePresence>
         {showLogin && (
           <Login onBack={() => setShowLogin(false)} onLogin={onLogin} />
@@ -1182,13 +1292,15 @@ interface CustomerHomeProps {
   user: User;
   orders: Order[];
   workers: any[];
+  lang: AppLang;
   onOrderClick: (order: Order) => void;
   onWorkerClick: (workerId: string) => void;
   onCreateClick: (category?: string) => void;
   onShowSupport?: () => void;
 }
 
-const CustomerHome = ({ user, orders, workers, onOrderClick, onWorkerClick, onCreateClick, onShowSupport, isLoading }: CustomerHomeProps & { isLoading?: boolean }) => {
+const CustomerHome = ({ user, orders, workers, lang, onOrderClick, onWorkerClick, onCreateClick, onShowSupport, isLoading }: CustomerHomeProps & { isLoading?: boolean }) => {
+  const t = TRANSLATIONS[lang];
   const [filterStatus, setFilterStatus] = useState<Order['status'] | 'all'>('all');
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [showFilters, setShowFilters] = useState(false);
@@ -1201,18 +1313,18 @@ const CustomerHome = ({ user, orders, workers, onOrderClick, onWorkerClick, onCr
   });
 
   return (
-    <div className="p-6 overflow-y-auto flex-1">
+    <div className="page-gutters py-6 overflow-y-auto flex-1">
       <div className="mb-8">
-        <h2 className="text-2xl font-bold mb-2 text-slate-900">Привет, {user.name}! 👋</h2>
-        <p className="text-slate-500">Нужна помощь с грузом или ремонтом?</p>
+        <h2 className="text-2xl font-bold mb-2 text-slate-900">{t.hello}, {user.name}! 👋</h2>
+        <p className="text-slate-500">{t.needHelp}</p>
       </div>
       
       <div className="grid grid-cols-2 gap-4 mb-8">
         {[
-          { icon: <Briefcase size={24} />, label: 'Грузчики', color: 'bg-orange-50 text-orange-600' },
-          { icon: <MapPin size={24} />, label: 'Переезд', color: 'bg-blue-50 text-blue-600' },
-          { icon: <PlusCircle size={24} />, label: 'Сборка', color: 'bg-emerald-50 text-emerald-600' },
-          { icon: <Search size={24} />, label: 'Разное', color: 'bg-purple-50 text-purple-600' },
+          { icon: <Briefcase size={24} />, label: 'Грузчики', text: t.loaders, color: 'bg-orange-50 text-orange-600' },
+          { icon: <MapPin size={24} />, label: 'Переезд', text: t.moving, color: 'bg-blue-50 text-blue-600' },
+          { icon: <PlusCircle size={24} />, label: 'Сборка', text: t.assembly, color: 'bg-emerald-50 text-emerald-600' },
+          { icon: <Search size={24} />, label: 'Разное', text: t.other, color: 'bg-purple-50 text-purple-600' },
         ].map((cat, i) => (
           <button 
             key={i} 
@@ -1220,13 +1332,13 @@ const CustomerHome = ({ user, orders, workers, onOrderClick, onWorkerClick, onCr
             className={`${cat.color} p-4 rounded-2xl flex flex-col items-center gap-2 font-semibold transition-all active:scale-95 shadow-sm`}
           >
             {cat.icon}
-            <span className="text-sm">{cat.label}</span>
+            <span className="text-sm">{cat.text}</span>
           </button>
         ))}
       </div>
 
       <div className="flex items-center justify-between mb-4">
-        <h3 className="font-bold text-lg text-slate-900">Ваши заказы</h3>
+        <h3 className="font-bold text-lg text-slate-900">{t.yourOrders}</h3>
         <button 
           onClick={() => setShowFilters(!showFilters)}
           className={`p-2 rounded-xl border transition-colors ${showFilters ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-100 text-slate-600'}`}
@@ -1237,10 +1349,10 @@ const CustomerHome = ({ user, orders, workers, onOrderClick, onWorkerClick, onCr
 
       <div className="flex gap-2 overflow-x-auto pb-4 mb-2">
         {[
-          { id: 'all', label: 'Все' },
-          { id: 'open', label: 'Открытые' },
-          { id: 'in-progress', label: 'В работе' },
-          { id: 'completed', label: 'Завершенные' },
+          { id: 'all', label: t.all },
+          { id: 'open', label: t.open },
+          { id: 'in-progress', label: t.inProgress },
+          { id: 'completed', label: t.completed },
         ].map(status => (
           <button
             key={status.id}
@@ -1261,7 +1373,7 @@ const CustomerHome = ({ user, orders, workers, onOrderClick, onWorkerClick, onCr
             className="overflow-hidden mb-6"
           >
             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-              <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Категория</label>
+              <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">{t.category}</label>
               <div className="flex gap-2 overflow-x-auto pb-2">
                 {['all', 'Грузчики', 'Переезд', 'Сборка', 'Разное'].map(cat => (
                   <button
@@ -1273,7 +1385,7 @@ const CustomerHome = ({ user, orders, workers, onOrderClick, onWorkerClick, onCr
                         : 'bg-white border-slate-200 text-slate-500'
                     }`}
                   >
-                    {cat === 'all' ? 'Все' : cat}
+                    {getCategoryLabel(cat, t)}
                   </button>
                 ))}
               </div>
@@ -1295,17 +1407,18 @@ const CustomerHome = ({ user, orders, workers, onOrderClick, onWorkerClick, onCr
             onClick={onOrderClick} 
             onWorkerClick={onWorkerClick}
             role="customer"
+            lang={lang}
           />
         ))
       ) : (
         <div className="text-center py-12 bg-slate-50 rounded-3xl">
           <Search className="text-slate-300 mx-auto mb-2" size={32} />
-          <p className="text-slate-500 text-sm">Заказов не найдено</p>
+          <p className="text-slate-500 text-sm">{t.noOrders}</p>
         </div>
       )}
 
       <button 
-        onClick={onCreateClick}
+        onClick={() => onCreateClick('Грузчики')}
         className="fixed bottom-24 right-6 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg flex items-center justify-center active:scale-90 transition-transform z-20"
       >
         <PlusCircle size={28} />
@@ -1314,7 +1427,7 @@ const CustomerHome = ({ user, orders, workers, onOrderClick, onWorkerClick, onCr
       <button 
         onClick={() => onShowSupport?.()}
         className="fixed bottom-40 right-6 w-14 h-14 bg-slate-900 text-white rounded-full shadow-lg flex items-center justify-center active:scale-90 transition-transform z-20"
-        title="Поддержка"
+        title={t.supportTitle}
       >
         <MessageSquare size={24} />
       </button>
@@ -1323,38 +1436,57 @@ const CustomerHome = ({ user, orders, workers, onOrderClick, onWorkerClick, onCr
 };
 
 interface WorkerHomeProps {
+  user?: User;
   orders: Order[];
   workers: any[];
+  lang: AppLang;
   onOrderClick: (order: Order) => void;
   onQuickApply: (orderId: string) => void;
   onWorkerClick: (workerId: string) => void;
   onShowSupport?: () => void;
+  currentUserId?: string;
 }
 
-const WorkerHome = ({ orders, workers, onOrderClick, onQuickApply, onWorkerClick, onShowSupport, isLoading }: WorkerHomeProps & { isLoading?: boolean }) => {
+const WorkerHome = ({ user, orders, workers, lang, onOrderClick, onQuickApply, onWorkerClick, onShowSupport, isLoading, currentUserId }: WorkerHomeProps & { isLoading?: boolean }) => {
+  const t = TRANSLATIONS[lang];
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<Order['status'] | 'all'>('open');
   const [filterDistance, setFilterDistance] = useState<number>(50);
   const [minBudget, setMinBudget] = useState<number>(0);
   const [showFilters, setShowFilters] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
-  const [searchCenter, setSearchCenter] = useState<[number, number]>([55.7558, 37.6173]); // Default to Moscow
+  const [searchCenter, setSearchCenter] = useState<[number, number]>(
+    user?.lat && user?.lng ? [user.lat, user.lng] : [55.7558, 37.6173]
+  );
   const [isLocating, setIsLocating] = useState(false);
 
   const categories = ['all', 'Грузчики', 'Переезд', 'Сборка', 'Разное'];
 
+  useEffect(() => {
+    if (user?.lat && user?.lng) {
+      setSearchCenter([user.lat, user.lng]);
+    }
+  }, [user?.lat, user?.lng]);
+
   const handleGetCurrentLocation = () => {
-    if (!navigator.geolocation) return;
+    if (!navigator.geolocation) {
+      alert(lang === 'en' ? 'Geolocation is not available on this device' : 'Геолокация недоступна на этом устройстве');
+      return;
+    }
     setIsLocating(true);
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setSearchCenter([position.coords.latitude, position.coords.longitude]);
         setIsLocating(false);
       },
-      () => {
+      (error) => {
         setIsLocating(false);
-        alert('Не удалось получить местоположение');
-      }
+        const message = error.code === error.PERMISSION_DENIED
+          ? (lang === 'en' ? 'Allow location access in phone settings' : 'Разрешите приложению доступ к геолокации в настройках телефона')
+          : (lang === 'en' ? 'Could not get location. Check GPS and internet' : 'Не удалось получить местоположение. Проверьте GPS и интернет');
+        alert(message);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
     );
   };
 
@@ -1384,27 +1516,27 @@ const WorkerHome = ({ orders, workers, onOrderClick, onQuickApply, onWorkerClick
   });
 
   return (
-    <div className="p-6 overflow-y-auto flex-1">
+    <div className="page-gutters py-6 overflow-y-auto flex-1">
       <div className="bg-slate-900 text-white p-6 rounded-3xl mb-6 relative overflow-hidden transition-colors">
         <div className="relative z-10">
-          <h2 className="text-xl font-bold mb-1">Вы на линии</h2>
-          <p className="text-slate-400 text-sm mb-4">Рядом {filteredOrders.length} подходящих заказов</p>
+          <h2 className="text-xl font-bold mb-1">{lang === 'en' ? 'You are online' : 'Вы на линии'}</h2>
+          <p className="text-slate-400 text-sm mb-4">{lang === 'en' ? `${filteredOrders.length} nearby matching orders` : `Рядом ${filteredOrders.length} подходящих заказов`}</p>
           <div className="flex items-center gap-2 bg-white/10 w-fit px-3 py-1 rounded-full text-xs">
             <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
-            Радиус поиска: {filterDistance} км
+            {lang === 'en' ? `Search radius: ${filterDistance} km` : `Радиус поиска: ${filterDistance} км`}
           </div>
         </div>
         <Briefcase className="absolute -right-4 -bottom-4 text-white/5 w-32 h-32" />
       </div>
 
       <div className="flex items-center justify-between mb-4">
-        <h3 className="font-bold text-lg text-slate-900">Доступные заказы</h3>
+        <h3 className="font-bold text-lg text-slate-900">{t.availableOrders}</h3>
         <div className="flex gap-2">
           <button 
             onClick={handleGetCurrentLocation}
             disabled={isLocating}
             className="p-2 bg-white border border-slate-100 rounded-xl text-blue-600 shadow-sm active:scale-95 transition-all disabled:opacity-50"
-            title="Мое местоположение"
+            title={lang === 'en' ? 'My location' : 'Мое местоположение'}
           >
             <Navigation size={20} className={isLocating ? 'animate-spin' : ''} />
           </button>
@@ -1433,10 +1565,10 @@ const WorkerHome = ({ orders, workers, onOrderClick, onQuickApply, onWorkerClick
 
       <div className="flex gap-2 overflow-x-auto pb-4 mb-2">
         {[
-          { id: 'all', label: 'Все' },
-          { id: 'open', label: 'Открытые' },
-          { id: 'in-progress', label: 'В работе' },
-          { id: 'completed', label: 'Завершенные' },
+          { id: 'all', label: t.all },
+          { id: 'open', label: t.open },
+          { id: 'in-progress', label: t.inProgress },
+          { id: 'completed', label: t.completed },
         ].map(status => (
           <button
             key={status.id}
@@ -1458,36 +1590,36 @@ const WorkerHome = ({ orders, workers, onOrderClick, onQuickApply, onWorkerClick
           >
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Категория</label>
+                <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">{t.category}</label>
                 <select 
                   value={filterCategory}
                   onChange={(e) => setFilterCategory(e.target.value)}
                   className="w-full p-3 bg-white border border-slate-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   {categories.map(cat => (
-                    <option key={cat} value={cat}>{cat === 'all' ? 'Все категории' : cat}</option>
+                    <option key={cat} value={cat}>{cat === 'all' ? t.allCategories : getCategoryLabel(cat, t)}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Мин. бюджет (₽)</label>
+                <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">{lang === 'en' ? 'Min. budget (₽)' : 'Мин. бюджет (₽)'}</label>
                 <select 
                   value={minBudget}
                   onChange={(e) => setMinBudget(Number(e.target.value))}
                   className="w-full p-3 bg-white border border-slate-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value={0}>Любой</option>
-                  <option value={1000}>от 1000</option>
-                  <option value={2000}>от 2000</option>
-                  <option value={3000}>от 3000</option>
-                  <option value={5000}>от 5000</option>
-                  <option value={10000}>от 10000</option>
+                  <option value={0}>{lang === 'en' ? 'Any' : 'Любой'}</option>
+                  <option value={1000}>{lang === 'en' ? 'from 1000' : 'от 1000'}</option>
+                  <option value={2000}>{lang === 'en' ? 'from 2000' : 'от 2000'}</option>
+                  <option value={3000}>{lang === 'en' ? 'from 3000' : 'от 3000'}</option>
+                  <option value={5000}>{lang === 'en' ? 'from 5000' : 'от 5000'}</option>
+                  <option value={10000}>{lang === 'en' ? 'from 10000' : 'от 10000'}</option>
                 </select>
               </div>
             </div>
             <div>
               <div className="flex justify-between items-center mb-2">
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Макс. расстояние</label>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">{lang === 'en' ? 'Max. distance' : 'Макс. расстояние'}</label>
                 <span className="text-xs font-bold text-blue-600">{filterDistance} км</span>
               </div>
               <input 
@@ -1505,7 +1637,7 @@ const WorkerHome = ({ orders, workers, onOrderClick, onQuickApply, onWorkerClick
                 className="flex-1 bg-blue-50 border border-blue-100 p-3 rounded-xl text-xs font-bold text-blue-600 flex items-center justify-center gap-2 active:scale-95 transition-all"
               >
                 <MapIcon size={14} />
-                Выбрать на карте
+                {lang === 'en' ? 'Choose on map' : 'Выбрать на карте'}
               </button>
             </div>
           </motion.div>
@@ -1538,7 +1670,7 @@ const WorkerHome = ({ orders, workers, onOrderClick, onQuickApply, onWorkerClick
                 iconAnchor: [10, 10]
               })}>
                 <Popup>
-                  <div className="text-xs font-bold text-center">Центр поиска</div>
+                  <div className="text-xs font-bold text-center">{lang === 'en' ? 'Search center' : 'Центр поиска'}</div>
                 </Popup>
               </Marker>
               <Circle 
@@ -1561,7 +1693,7 @@ const WorkerHome = ({ orders, workers, onOrderClick, onQuickApply, onWorkerClick
                     <div className="p-2 min-w-[180px] font-sans">
                       <div className="flex justify-between items-start mb-2 gap-2">
                         <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 rounded-full text-[9px] font-bold uppercase tracking-wider">
-                          {order.category}
+                          {getCategoryLabel(order.category, t)}
                         </span>
                         <span className="font-bold text-slate-900">{order.budget} ₽</span>
                       </div>
@@ -1573,7 +1705,7 @@ const WorkerHome = ({ orders, workers, onOrderClick, onQuickApply, onWorkerClick
                         onClick={() => onOrderClick(order)}
                         className="w-full bg-slate-900 text-white py-2 rounded-xl text-xs font-bold active:scale-95 transition-all hover:bg-slate-800"
                       >
-                        Подробнее
+                        {lang === 'en' ? 'Details' : 'Подробнее'}
                       </button>
                     </div>
                   </Popup>
@@ -1591,7 +1723,9 @@ const WorkerHome = ({ orders, workers, onOrderClick, onQuickApply, onWorkerClick
                 onClick={onOrderClick} 
                 onWorkerClick={onWorkerClick}
                 onQuickApply={onQuickApply}
+                currentUserId={currentUserId}
                 role="worker"
+                lang={lang}
               />
             ))
           ) : (
@@ -1599,7 +1733,7 @@ const WorkerHome = ({ orders, workers, onOrderClick, onQuickApply, onWorkerClick
               <div className="bg-slate-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
                 <Search className="text-slate-300" size={32} />
               </div>
-              <p className="text-slate-500 font-medium">Заказов не найдено</p>
+              <p className="text-slate-500 font-medium">{t.noOrders}</p>
               <button 
                 onClick={() => {
                   setFilterCategory('all');
@@ -1608,7 +1742,7 @@ const WorkerHome = ({ orders, workers, onOrderClick, onQuickApply, onWorkerClick
                 }}
                 className="text-blue-600 text-sm font-bold mt-2"
               >
-                Сбросить фильтры
+                {t.resetFilters}
               </button>
             </div>
           )
@@ -1618,7 +1752,7 @@ const WorkerHome = ({ orders, workers, onOrderClick, onQuickApply, onWorkerClick
       <button 
         onClick={() => onShowSupport?.()}
         className="fixed bottom-24 right-6 w-14 h-14 bg-slate-900 text-white rounded-full shadow-lg flex items-center justify-center active:scale-90 transition-transform z-20"
-        title="Поддержка"
+        title={t.supportTitle}
       >
         <MessageSquare size={24} />
       </button>
@@ -1629,19 +1763,21 @@ const WorkerHome = ({ orders, workers, onOrderClick, onQuickApply, onWorkerClick
 interface ChatListProps {
   userId: string;
   chats: Chat[];
+  lang: AppLang;
   onChatClick: (chat: Chat) => void;
 }
 
-const ChatList = ({ userId, chats, onChatClick }: ChatListProps) => {
+const ChatList = ({ userId, chats, lang, onChatClick }: ChatListProps) => {
+  const t = TRANSLATIONS[lang];
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="p-6">
-        <h2 className="text-2xl font-bold mb-6">Сообщения</h2>
+        <h2 className="text-2xl font-bold mb-6">{t.messages}</h2>
         <div className="space-y-2">
           {chats.length === 0 && (
             <div className="text-center py-12 text-slate-400">
               <MessageSquare size={48} className="mx-auto mb-4 opacity-20" />
-              <p>Нет активных чатов</p>
+              <p>{t.noChats}</p>
             </div>
           )}
           {chats.map(chat => (
@@ -1658,7 +1794,7 @@ const ChatList = ({ userId, chats, onChatClick }: ChatListProps) => {
                     {chat.lastMessageAt ? new Date(chat.lastMessageAt.toMillis()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                   </span>
                 </div>
-                <p className="text-sm text-slate-500 line-clamp-1">{chat.lastMessage || 'Начните общение...'}</p>
+                <p className="text-sm text-slate-500 line-clamp-1">{chat.lastMessage || t.startChat}</p>
               </div>
               {chat.unreadCount && chat.unreadCount[userId] > 0 && (
                 <div className="absolute top-4 right-4 bg-blue-600 text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center">
@@ -1676,10 +1812,12 @@ const ChatList = ({ userId, chats, onChatClick }: ChatListProps) => {
 interface ChatRoomProps {
   userId: string;
   chat: Chat;
+  lang?: AppLang;
   onBack: () => void;
 }
 
-const ChatRoom = ({ userId, chat, onBack }: ChatRoomProps) => {
+const ChatRoom = ({ userId, chat, lang = 'ru', onBack }: ChatRoomProps) => {
+  const t = TRANSLATIONS[lang];
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMsg, setNewMsg] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1706,7 +1844,19 @@ const ChatRoom = ({ userId, chat, onBack }: ChatRoomProps) => {
 
   const handleSend = async () => {
     if (!newMsg.trim()) return;
-    const recipientId = chat.customerId === userId ? chat.workerId : chat.customerId;
+
+    const recipientId =
+      chat.participants?.find((participant) => participant !== userId) ||
+      (chat.workerId === 'support' || chat.dispatcherId === 'support'
+        ? 'support'
+        : chat.customerId === userId
+          ? chat.workerId
+          : chat.workerId === userId
+            ? chat.customerId
+            : chat.dispatcherId === userId
+              ? chat.customerId || chat.workerId
+              : chat.dispatcherId || chat.customerId || chat.workerId);
+    if (!recipientId) return;
     await chatService.sendMessage(chat.id, userId, newMsg, recipientId);
     setNewMsg('');
   };
@@ -1718,7 +1868,7 @@ const ChatRoom = ({ userId, chat, onBack }: ChatRoomProps) => {
       exit={{ x: '100%' }}
       className="absolute inset-0 bg-white z-50 flex flex-col"
     >
-      <Header title={chat.otherUserName || 'Чат'} showBack onBack={onBack} />
+      <Header title={chat.otherUserName || t.chat} showBack onBack={onBack} />
       <div ref={scrollRef} className="flex-1 p-6 overflow-y-auto space-y-4">
         {messages.map((m) => (
           <div key={m.id} className={`flex ${m.senderId === userId ? 'justify-end' : 'justify-start'}`}>
@@ -1736,13 +1886,13 @@ const ChatRoom = ({ userId, chat, onBack }: ChatRoomProps) => {
           </div>
         ))}
       </div>
-      <div className="p-4 border-t border-slate-100 safe-area-bottom flex gap-2">
+      <div className="p-4 border-t border-slate-100 flex gap-2">
         <input 
           type="text" 
           value={newMsg}
           onChange={(e) => setNewMsg(e.target.value)}
           onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-          placeholder="Сообщение..." 
+          placeholder={t.messagePlaceholder}
           className="flex-1 bg-slate-100 border-none rounded-full px-6 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
         />
         <button 
@@ -1759,6 +1909,7 @@ const ChatRoom = ({ userId, chat, onBack }: ChatRoomProps) => {
 interface ProfileProps {
   user: User;
   orders: Order[];
+  lang: AppLang;
   onLogout: () => void;
   onUpdateUser?: (user: User) => void;
   onShowHistory?: () => void;
@@ -1767,10 +1918,17 @@ interface ProfileProps {
   onShowSupport?: () => void;
 }
 
-const Profile = ({ user, orders, onLogout, onUpdateUser, onShowHistory, onShowNotifications, onShowSettings, onShowSupport }: ProfileProps) => {
+const Profile = ({ user, orders, lang, onLogout, onUpdateUser, onShowHistory, onShowNotifications, onShowSettings, onShowSupport }: ProfileProps) => {
+  const t = TRANSLATIONS[lang];
   const [activeSubTab, setActiveSubTab] = useState<'main' | 'portfolio' | 'reviews'>('main');
   const [isEditing, setIsEditing] = useState(false);
   const [selectedMedia, setSelectedMedia] = useState<PortfolioItem | null>(null);
+  const [portfolioUploadState, setPortfolioUploadState] = useState<'idle' | 'uploading' | 'error'>('idle');
+  const [portfolioUploadMessage, setPortfolioUploadMessage] = useState('');
+  const userReviews = Array.isArray(user.reviews) ? user.reviews : [];
+  const displayedRating = userReviews.length > 0
+    ? Math.round((userReviews.reduce((sum, review) => sum + (review.rating || 0), 0) / userReviews.length) * 10) / 10
+    : (user.rating || 0);
 
   const completedOrders = orders.filter(o => {
     const isCompleted = o.status === 'completed';
@@ -1794,31 +1952,55 @@ const Profile = ({ user, orders, onLogout, onUpdateUser, onShowHistory, onShowNo
     bio: user.bio || ''
   });
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, target: 'portfolio' | 'avatar') => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, target: 'portfolio' | 'avatar') => {
     const file = e.target.files?.[0];
+    e.currentTarget.value = '';
     if (!file || !onUpdateUser) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const url = event.target?.result as string;
-      
-      if (target === 'avatar') {
+    if (target === 'avatar') {
+      try {
+        const { uploadAvatar } = await import('./firebase');
+        const uid = user.id;
+        const url = await uploadAvatar(uid, file);
         onUpdateUser({ ...user, avatar: url });
-      } else {
-        if (!user.portfolio) return;
-        const type = file.type.startsWith('video') ? 'video' : 'image';
-        const newItem: PortfolioItem = {
-          type,
-          url,
-          thumbnail: type === 'video' ? 'https://picsum.photos/seed/vid/600/400' : undefined
-        };
-        onUpdateUser({
-          ...user,
-          portfolio: [...user.portfolio, newItem]
-        });
+      } catch (err) {
+        console.error('Avatar upload error:', err);
       }
-    };
-    reader.readAsDataURL(file);
+    } else {
+      setPortfolioUploadState('uploading');
+      setPortfolioUploadMessage(t.uploading);
+      try {
+        const { storage } = await import('./firebase');
+        const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+        const uploadFile = file.type.startsWith('image/') ? await resizeImageFile(file) : file;
+        const storageRef = ref(storage, `portfolio/${user.id}/${Date.now()}_${uploadFile.name}`);
+        await uploadBytes(storageRef, uploadFile);
+        const url = await getDownloadURL(storageRef);
+        const type = uploadFile.type.startsWith('video') ? 'video' : 'image';
+        const newItem: PortfolioItem = { type, url };
+        const updatedPortfolio = [...(user.portfolio || []), newItem];
+        await Promise.resolve(onUpdateUser({ ...user, portfolio: updatedPortfolio }));
+        setPortfolioUploadState('idle');
+        setPortfolioUploadMessage('');
+      } catch (err) {
+        console.error('Portfolio upload error:', err);
+        if (file.type.startsWith('image/')) {
+          try {
+            const fallbackFile = await resizeImageFile(file, 900, 0.72);
+            const url = await readFileAsDataUrl(fallbackFile);
+            const updatedPortfolio = [...(user.portfolio || []), { type: 'image' as const, url }];
+            await Promise.resolve(onUpdateUser({ ...user, portfolio: updatedPortfolio }));
+            setPortfolioUploadState('idle');
+            setPortfolioUploadMessage('');
+            return;
+          } catch (fallbackError) {
+            console.error('Portfolio fallback error:', fallbackError);
+          }
+        }
+        setPortfolioUploadState('error');
+        setPortfolioUploadMessage(lang === 'en' ? 'Could not add the file. Try another photo or check Firebase Storage.' : 'Не удалось добавить файл. Попробуйте другое фото или проверьте Firebase Storage.');
+      }
+    }
   };
 
   const handleSaveEdit = () => {
@@ -1852,7 +2034,7 @@ const Profile = ({ user, orders, onLogout, onUpdateUser, onShowHistory, onShowNo
       />
 
       {/* Header with Tabs */}
-      <div className="pt-6 px-6 border-b border-slate-100">
+      <div className="safe-area-top pt-6 page-gutters border-b border-slate-100">
         <div className="flex flex-col items-center mb-6">
           <div className="relative mb-4 group">
             <img src={user.avatar} className="w-24 h-24 rounded-full border-4 border-white shadow-lg object-cover" />
@@ -1871,21 +2053,24 @@ const Profile = ({ user, orders, onLogout, onUpdateUser, onShowHistory, onShowNo
           </div>
           <div className="flex items-center gap-1 text-amber-500 mt-1">
             <Star size={16} fill="currentColor" />
-            <span className="font-bold">{user.rating}</span>
-            <span className="text-slate-400 text-sm font-normal ml-1">(48 отзывов)</span>
+            <span className="font-bold">{displayedRating}</span>
+            <span className="text-slate-400 text-sm font-normal ml-1">
+              ({userReviews.length} {t.reviews.toLowerCase()})
+            </span>
           </div>
         </div>
 
-        <div className="flex gap-8">
+        <div className="-mx-5 overflow-x-auto no-scrollbar">
+          <div className="flex gap-8 min-w-max px-5">
           {[
-            { id: 'main', label: 'Профиль', icon: <UserIcon size={18} /> },
-            ...(user.role === 'worker' ? [{ id: 'portfolio', label: 'Портфолио', icon: <Briefcase size={18} /> }] : []),
-            { id: 'reviews', label: 'Отзывы', icon: <Star size={18} /> },
+            { id: 'main', label: t.profile, icon: <UserIcon size={18} /> },
+            ...(user.role === 'worker' ? [{ id: 'portfolio', label: lang === 'en' ? 'Portfolio' : 'Портфолио', icon: <Briefcase size={18} /> }] : []),
+            { id: 'reviews', label: t.reviews, icon: <Star size={18} /> },
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveSubTab(tab.id as any)}
-              className={`pb-3 flex items-center gap-2 text-sm font-bold uppercase tracking-wider transition-colors relative ${
+              className={`shrink-0 pb-3 flex items-center gap-2 text-sm font-bold uppercase tracking-wider transition-colors relative ${
                 activeSubTab === tab.id ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'
               }`}
             >
@@ -1896,6 +2081,7 @@ const Profile = ({ user, orders, onLogout, onUpdateUser, onShowHistory, onShowNo
               )}
             </button>
           ))}
+          </div>
         </div>
       </div>
 
@@ -1911,7 +2097,7 @@ const Profile = ({ user, orders, onLogout, onUpdateUser, onShowHistory, onShowNo
             >
               {user.bio && (
                 <div>
-                  <h3 className="text-[10px] font-bold text-slate-400 uppercase mb-3 tracking-wider">О себе</h3>
+                  <h3 className="text-[10px] font-bold text-slate-400 uppercase mb-3 tracking-wider">{t.aboutMe}</h3>
                   <p className="text-slate-600 text-sm leading-relaxed bg-slate-50 p-4 rounded-2xl border border-slate-100 italic">
                     "{user.bio}"
                   </p>
@@ -1922,7 +2108,7 @@ const Profile = ({ user, orders, onLogout, onUpdateUser, onShowHistory, onShowNo
                     <>
                       <div>
                         <h3 className="text-[10px] font-bold text-slate-400 uppercase mb-3 tracking-wider flex items-center gap-2">
-                          <ShieldCheck size={12} className="text-blue-600" /> Навыки и компетенции
+                          <ShieldCheck size={12} className="text-blue-600" /> {lang === 'en' ? 'Skills and competencies' : 'Навыки и компетенции'}
                         </h3>
                         <div className="flex flex-wrap gap-2">
                           {user.skills?.length ? user.skills.map((skill, i) => (
@@ -1937,19 +2123,19 @@ const Profile = ({ user, orders, onLogout, onUpdateUser, onShowHistory, onShowNo
                               {skill}
                             </motion.span>
                           )) : (
-                            <p className="text-xs text-slate-400 italic">Навыки не указаны</p>
+                            <p className="text-xs text-slate-400 italic">{t.noSkills}</p>
                           )}
                         </div>
                       </div>
 
                       <div>
                         <h3 className="text-[10px] font-bold text-slate-400 uppercase mb-3 tracking-wider flex items-center gap-2">
-                          <Briefcase size={12} className="text-blue-600" /> Опыт работы
+                          <Briefcase size={12} className="text-blue-600" /> {t.experience}
                         </h3>
                         <div className="bg-slate-50 p-5 rounded-3xl border border-slate-100 relative overflow-hidden">
                           <div className="absolute top-0 right-0 w-24 h-24 bg-blue-600/5 rounded-full -mr-12 -mt-12" />
                           <p className="text-slate-600 text-sm leading-relaxed relative z-10">
-                            {user.experience || 'Опыт работы не указан'}
+                            {user.experience || t.noExperience}
                           </p>
                         </div>
                       </div>
@@ -1958,8 +2144,8 @@ const Profile = ({ user, orders, onLogout, onUpdateUser, onShowHistory, onShowNo
 
               <div className="grid grid-cols-2 gap-4">
                 {[
-                  { label: 'Заказы', val: ordersCount.toString() },
-                  { label: 'Баланс', val: `${totalBalance} ₽` },
+                  { label: t.orders, val: ordersCount.toString() },
+                  { label: lang === 'en' ? 'Balance' : 'Баланс', val: `${totalBalance} ₽` },
                 ].map((stat, i) => (
                   <div key={i} className="bg-slate-50 p-3 rounded-2xl text-center border border-slate-100">
                     <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">{stat.label}</p>
@@ -1969,24 +2155,26 @@ const Profile = ({ user, orders, onLogout, onUpdateUser, onShowHistory, onShowNo
               </div>
 
               <div>
-                <h3 className="text-[10px] font-bold text-slate-400 uppercase mb-3 tracking-wider">Контактные данные</h3>
+                <h3 className="text-[10px] font-bold text-slate-400 uppercase mb-3 tracking-wider">{t.contactData}</h3>
                 <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex items-center gap-4">
                   <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-blue-600 shadow-sm">
                     <Phone size={20} />
                   </div>
                   <div>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Телефон</p>
-                    <p className="font-bold text-slate-900">{user.phone || 'Не указан'}</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{t.phone}</p>
+                    <p className="font-bold text-slate-900">{user.phone ? formatPhoneNumber(user.phone) : t.notSpecified}</p>
                   </div>
                 </div>
               </div>
 
               <div className="space-y-2">
                 {[
-                  { icon: <History size={20} />, label: 'История заказов', action: onShowHistory },
-                  { icon: <Bell size={20} />, label: 'Уведомления', action: onShowNotifications },
-                  { icon: <Settings size={20} />, label: 'Настройки', action: onShowSettings },
-                  { icon: <MessageSquare size={20} />, label: 'Служба поддержки', action: onShowSupport },
+                  { icon: <History size={20} />, label: t.orderHistory, action: onShowHistory },
+                  { icon: <Bell size={20} />, label: t.notifications, action: onShowNotifications },
+                  { icon: <Settings size={20} />, label: t.settings, action: onShowSettings },
+                  ...(user.role !== 'dispatcher'
+                    ? [{ icon: <MessageSquare size={20} />, label: t.support, action: onShowSupport }]
+                    : []),
                 ].map((item, i) => (
                   <button 
                     key={i} 
@@ -2005,7 +2193,7 @@ const Profile = ({ user, orders, onLogout, onUpdateUser, onShowHistory, onShowNo
                   className="w-full flex items-center gap-4 p-4 text-red-500 hover:bg-red-50 rounded-2xl transition-colors mt-4"
                 >
                   <LogOut size={20} />
-                  <span className="font-semibold">Выйти</span>
+                  <span className="font-semibold">{t.logout}</span>
                 </button>
               </div>
             </motion.div>
@@ -2018,14 +2206,20 @@ const Profile = ({ user, orders, onLogout, onUpdateUser, onShowHistory, onShowNo
               className="p-6"
             >
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-lg font-bold text-slate-900">Мои работы</h3>
+                <h3 className="text-lg font-bold text-slate-900">{t.myWorks}</h3>
                 <button 
                   onClick={() => fileInputRef.current?.click()}
+                  disabled={portfolioUploadState === 'uploading'}
                   className="bg-blue-600 text-white px-4 py-2 rounded-xl flex items-center gap-2 text-xs font-bold uppercase shadow-lg shadow-blue-200"
                 >
-                  <Plus size={16} /> Добавить
+                  <Plus size={16} /> {portfolioUploadState === 'uploading' ? t.uploading : t.add}
                 </button>
               </div>
+              {portfolioUploadMessage && (
+                <p className={`mb-4 text-xs font-semibold ${portfolioUploadState === 'error' ? 'text-red-500' : 'text-slate-400'}`}>
+                  {portfolioUploadMessage}
+                </p>
+              )}
               
               <div className="grid grid-cols-2 gap-4">
                 <AnimatePresence mode="popLayout">
@@ -2058,10 +2252,11 @@ const Profile = ({ user, orders, onLogout, onUpdateUser, onShowHistory, onShowNo
                 </AnimatePresence>
                 <button 
                   onClick={() => fileInputRef.current?.click()}
+                  disabled={portfolioUploadState === 'uploading'}
                   className="aspect-square rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 hover:border-blue-300 hover:text-blue-400 transition-colors bg-slate-50"
                 >
                   <Camera size={32} className="mb-2" />
-                  <span className="text-[10px] font-bold uppercase tracking-wider">Загрузить</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider">{t.upload}</span>
                 </button>
               </div>
             </motion.div>
@@ -2073,9 +2268,9 @@ const Profile = ({ user, orders, onLogout, onUpdateUser, onShowHistory, onShowNo
               exit={{ opacity: 0, y: -10 }}
               className="p-6 space-y-6"
             >
-              <h3 className="text-lg font-bold text-slate-900">Отзывы ({user.reviews?.length || 0})</h3>
+              <h3 className="text-lg font-bold text-slate-900">{t.reviews} ({userReviews.length})</h3>
               <div className="space-y-4">
-                {user.reviews?.map((review) => (
+                {userReviews.map((review) => (
                   <div key={review.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex items-center gap-3">
@@ -2093,10 +2288,10 @@ const Profile = ({ user, orders, onLogout, onUpdateUser, onShowHistory, onShowNo
                     <p className="text-slate-600 text-sm leading-relaxed">{review.text}</p>
                   </div>
                 ))}
-                {(!user.reviews || user.reviews.length === 0) && (
+                {userReviews.length === 0 && (
                   <div className="text-center py-12 text-slate-400">
                     <Star size={32} className="mx-auto mb-2 opacity-20" />
-                    <p>Отзывов пока нет</p>
+                    <p>{t.noReviews}</p>
                   </div>
                 )}
               </div>
@@ -2112,23 +2307,23 @@ const Profile = ({ user, orders, onLogout, onUpdateUser, onShowHistory, onShowNo
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
+            className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
           >
             <motion.div 
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
-              className="bg-white w-full max-w-md rounded-t-[32px] sm:rounded-[32px] overflow-hidden shadow-2xl"
+              className="bg-white w-full max-w-md max-h-[calc(100dvh-16px)] sm:max-h-[calc(100dvh-48px)] rounded-t-[32px] sm:rounded-[32px] overflow-hidden shadow-2xl flex flex-col"
             >
-              <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-                <h3 className="text-xl font-bold">Редактировать профиль</h3>
+              <div className="shrink-0 p-6 border-b border-slate-100 flex justify-between items-center safe-area-top">
+                <h3 className="text-xl font-bold">{t.editProfile}</h3>
                 <button onClick={() => setIsEditing(false)} className="p-2 hover:bg-slate-100 rounded-full">
                   <X size={24} />
                 </button>
               </div>
-              <div className="p-6 space-y-6">
+              <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-6 safe-area-bottom">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Имя</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{t.name}</label>
                   <input 
                     type="text" 
                     value={editForm.name}
@@ -2137,38 +2332,37 @@ const Profile = ({ user, orders, onLogout, onUpdateUser, onShowHistory, onShowNo
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Телефон</label>
-                  <input 
-                    type="text" 
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{t.phone}</label>
+                  <PhoneInput
                     value={editForm.phone}
-                    onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                    onChange={(phone) => setEditForm({ ...editForm, phone })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                   />
                 </div>
                 {user.role === 'worker' && (
                   <>
                     <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Навыки (через запятую)</label>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{lang === 'en' ? 'Skills (comma separated)' : 'Навыки (через запятую)'}</label>
                       <input 
                         type="text" 
                         value={editForm.skills}
                         onChange={(e) => setEditForm({ ...editForm, skills: e.target.value })}
                         className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                        placeholder="Грузоперевозки, Сборка мебели..."
+                        placeholder={lang === 'en' ? 'Moving, Furniture assembly...' : 'Грузоперевозки, Сборка мебели...'}
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">О себе (Bio)</label>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{lang === 'en' ? 'About me (Bio)' : 'О себе (Bio)'}</label>
                       <textarea 
                         rows={3}
                         value={editForm.bio}
                         onChange={(e) => setEditForm({ ...editForm, bio: e.target.value })}
                         className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none"
-                        placeholder="Расскажите немного о себе..."
+                        placeholder={lang === 'en' ? 'Tell us a little about yourself...' : 'Расскажите немного о себе...'}
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Опыт работы</label>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{t.experience}</label>
                       <textarea 
                         rows={4}
                         value={editForm.experience}
@@ -2182,7 +2376,7 @@ const Profile = ({ user, orders, onLogout, onUpdateUser, onShowHistory, onShowNo
                   onClick={handleSaveEdit}
                   className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all"
                 >
-                  <Check size={20} /> Сохранить изменения
+                  <Check size={20} /> {t.saveChanges}
                 </button>
               </div>
             </motion.div>
@@ -2223,22 +2417,47 @@ const Profile = ({ user, orders, onLogout, onUpdateUser, onShowHistory, onShowNo
   );
 };
 
-const WorkerProfile = ({ workerId, workers, orders, onBack, onSelect, onOrderClick }: { 
+const WorkerProfile = ({ workerId, workers, orders, role, onBack, onSelect, onOrderClick }: { 
   workerId: string, 
   workers: any[],
   orders: Order[],
+  role: string,
   onBack: () => void, 
   onSelect?: () => void,
   onOrderClick?: (order: Order) => void
 }) => {
-  const displayWorkers = workers.length > 0 ? workers : Object.values(MOCK_WORKER_PROFILES);
-  const profile = displayWorkers.find(w => w.id === workerId) || displayWorkers[0];
+  const displayWorkers = workers.filter(w => w.role === 'worker');
+  const profile = (displayWorkers.find(w => w.id === workerId || w.uid === workerId) || {
+    id: workerId,
+    name: 'Исполнитель',
+    avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=worker',
+    rating: 0,
+    reviewsCount: 0,
+    bio: 'Информация пока не заполнена',
+    portfolio: [],
+    skills: [],
+    reviews: [],
+    responseTime: '',
+    isOnline: false
+  }) as WorkerProfileData & Record<string, any>;
+  const profileReviews = Array.isArray(profile.reviews) ? profile.reviews : [];
+  const profileRating = profileReviews.length > 0
+    ? Math.round((profileReviews.reduce((sum: number, review: Review) => sum + (review.rating || 0), 0) / profileReviews.length) * 10) / 10
+    : (profile.rating || 0);
+  const profileReviewsCount = profileReviews.length || profile.reviewsCount || 0;
+  const profileSkills = Array.isArray(profile.skills) ? profile.skills : [];
+  const profilePortfolio = Array.isArray(profile.portfolio) ? profile.portfolio : [];
 
   const workerHistory = orders.filter(o => 
     o.workerId === workerId || 
     o.assignedWorkers?.some(aw => aw.id === workerId) ||
     o.candidates?.includes(workerId)
   );
+
+  const [selectedPortfolioItem, setSelectedPortfolioItem] = useState<{
+    type: 'image' | 'video';
+    url: string;
+  } | null>(null);
 
   return (
     <motion.div 
@@ -2260,14 +2479,14 @@ const WorkerProfile = ({ workerId, workers, orders, onBack, onSelect, onOrderCli
           <div className="flex items-center gap-2 mt-1">
             <div className="flex items-center gap-1 text-amber-400">
               <Star size={14} fill="currentColor" />
-              <span className="font-bold">{profile.rating}</span>
+              <span className="font-bold">{profileRating}</span>
             </div>
-            <span className="text-white/60 text-sm">• {profile.reviewsCount} отзывов</span>
+            <span className="text-white/60 text-sm">• {profileReviewsCount} отзывов</span>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-8">
+      <div className="flex-1 overflow-y-auto page-gutters py-6 space-y-8">
         <div className="flex items-center gap-6 p-4 bg-slate-50 rounded-2xl border border-slate-100 transition-colors">
           <div className="flex flex-col items-center gap-1 flex-1">
             <div className="flex items-center gap-2 text-slate-400 mb-1">
@@ -2292,11 +2511,11 @@ const WorkerProfile = ({ workerId, workers, orders, onBack, onSelect, onOrderCli
           <h3 className="font-bold text-lg mb-2 text-slate-900">О себе</h3>
           <p className="text-slate-600 leading-relaxed mb-6">{profile.bio}</p>
 
-          {profile.skills && profile.skills.length > 0 && (
+          {profileSkills.length > 0 && (
             <div className="mb-6">
               <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Навыки</h4>
               <div className="flex flex-wrap gap-2">
-                {profile.skills.map((skill: string, i: number) => (
+                {profileSkills.map((skill: string, i: number) => (
                   <span key={i} className="px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-xs font-bold">
                     {skill}
                   </span>
@@ -2313,54 +2532,67 @@ const WorkerProfile = ({ workerId, workers, orders, onBack, onSelect, onOrderCli
           )}
         </div>
 
-        <div>
-          <h3 className="font-bold text-lg mb-4 text-slate-900">История заказов</h3>
-          <div className="space-y-3">
-            {workerHistory.length > 0 ? (
-              workerHistory.map(order => (
-                <div 
-                  key={order.id} 
-                  onClick={() => onOrderClick?.(order)}
-                  className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex justify-between items-center cursor-pointer hover:border-blue-200 transition-all"
-                >
-                  <div>
-                    <p className="font-bold text-slate-900 text-sm">{order.title}</p>
-                    <p className="text-[10px] text-slate-400 uppercase font-bold mt-1">{order.date || 'Дата не указана'}</p>
+        {role === 'dispatcher' && (
+          <div>
+            <h3 className="font-bold text-lg mb-4 text-slate-900">История заказов</h3>
+            <div className="space-y-3">
+              {workerHistory.length > 0 ? (
+                workerHistory.map(order => (
+                  <div 
+                    key={order.id} 
+                    onClick={() => onOrderClick?.(order)}
+                    className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex justify-between items-center cursor-pointer hover:border-blue-200 transition-all"
+                  >
+                    <div>
+                      <p className="font-bold text-slate-900 text-sm">{order.title}</p>
+                      <p className="text-[10px] text-slate-400 uppercase font-bold mt-1">{order.date || 'Дата не указана'}</p>
+                    </div>
+                    <div className="text-right">
+                      <span className={`text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider ${
+                        order.status === 'completed' ? 'bg-emerald-50 text-emerald-600' :
+                        order.status === 'in-progress' ? 'bg-blue-50 text-blue-600' :
+                        'bg-amber-50 text-amber-600'
+                      }`}>
+                        {order.status === 'completed' ? 'Завершен' :
+                        order.status === 'in-progress' ? 'В работе' : 'Ожидает'}
+                      </span>
+                      <p className="text-xs font-bold text-slate-900 mt-1">{order.budget} ₽</p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <span className={`text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider ${
-                      order.status === 'completed' ? 'bg-emerald-50 text-emerald-600' :
-                      order.status === 'in-progress' ? 'bg-blue-50 text-blue-600' :
-                      'bg-amber-50 text-amber-600'
-                    }`}>
-                      {order.status === 'completed' ? 'Завершен' :
-                       order.status === 'in-progress' ? 'В работе' : 'Ожидает'}
-                    </span>
-                    <p className="text-xs font-bold text-slate-900 mt-1">{order.budget} ₽</p>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p className="text-slate-400 text-sm italic">История заказов пуста</p>
-            )}
+                ))
+              ) : (
+                <p className="text-slate-400 text-sm italic">История заказов пуста</p>
+              )}
+            </div>
           </div>
-        </div>
+        )}
+       
 
         <div>
           <h3 className="font-bold text-lg mb-4 text-slate-900">Портфолио</h3>
           <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
-            {profile.portfolio.map((item: any, i: number) => {
+            {(profile.portfolio || []).map((item: any, i: number) => {
               const isVideo = typeof item === 'object' ? item.type === 'video' : false;
               const url = typeof item === 'object' ? item.url : item;
               const thumb = typeof item === 'object' ? item.thumbnail || item.url : item;
 
               return (
-                <div key={i} className="relative flex-shrink-0 group">
-                  <img 
-                    src={thumb} 
-                    className="w-48 h-32 rounded-2xl object-cover border border-slate-100 shadow-sm" 
+                <div
+                  key={i}
+                  className="relative flex-shrink-0 group cursor-pointer"
+                  onClick={() =>
+                    setSelectedPortfolioItem({
+                      type: isVideo ? 'video' : 'image',
+                      url,
+                    })
+                  }
+                >
+                  <img
+                    src={thumb}
+                    className="w-48 h-32 rounded-2xl object-cover border border-slate-100 shadow-sm"
                     referrerPolicy="no-referrer"
                   />
+
                   {isVideo && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded-2xl">
                       <div className="w-10 h-10 bg-white/80 backdrop-blur-sm rounded-full flex items-center justify-center text-blue-600 shadow-lg">
@@ -2368,8 +2600,19 @@ const WorkerProfile = ({ workerId, workers, orders, onBack, onSelect, onOrderCli
                       </div>
                     </div>
                   )}
+
                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl flex items-center justify-center">
-                    <button className="text-white text-xs font-bold px-3 py-1.5 bg-white/20 backdrop-blur-md rounded-lg">
+                    <button
+                      type="button"
+                      className="text-white text-xs font-bold px-3 py-1.5 bg-white/20 backdrop-blur-md rounded-lg"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedPortfolioItem({
+                          type: isVideo ? 'video' : 'image',
+                          url,
+                        });
+                      }}
+                    >
                       {isVideo ? 'Смотреть видео' : 'Увеличить'}
                     </button>
                   </div>
@@ -2382,7 +2625,7 @@ const WorkerProfile = ({ workerId, workers, orders, onBack, onSelect, onOrderCli
         <div>
           <h3 className="font-bold text-lg mb-4 text-slate-900">Отзывы</h3>
           <div className="space-y-4">
-            {profile.reviews.map(review => (
+            {profileReviews.map(review => (
               <div key={review.id} className="bg-slate-50 p-4 rounded-2xl border border-slate-100 transition-colors">
                 <div className="flex justify-between items-center mb-2">
                   <span className="font-bold text-slate-900">{review.author}</span>
@@ -2396,18 +2639,52 @@ const WorkerProfile = ({ workerId, workers, orders, onBack, onSelect, onOrderCli
                 <p className="text-sm text-slate-600">{review.text}</p>
               </div>
             ))}
+            {profileReviews.length === 0 && (
+              <p className="text-slate-400 text-sm italic">Отзывов пока нет</p>
+            )}
           </div>
         </div>
       </div>
 
       {onSelect && (
-        <div className="p-6 border-t border-slate-100 safe-area-bottom transition-colors">
+        <div className="page-gutters py-6 border-t border-slate-100 safe-area-bottom transition-colors">
           <button 
             onClick={onSelect}
             className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold text-lg shadow-lg active:scale-95 transition-transform"
           >
             Выбрать исполнителя
           </button>
+        </div>
+      )}
+
+      {selectedPortfolioItem && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+          onClick={() => setSelectedPortfolioItem(null)}
+        >
+          <button
+            type="button"
+            className="absolute top-4 right-4 text-white text-3xl leading-none"
+            onClick={() => setSelectedPortfolioItem(null)}
+          >
+            ×
+          </button>
+
+          {selectedPortfolioItem.type === 'video' ? (
+            <video
+              src={selectedPortfolioItem.url}
+              controls
+              autoPlay
+              className="max-w-full max-h-full object-contain rounded-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <img
+              src={selectedPortfolioItem.url}
+              className="max-w-full max-h-full object-contain rounded-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+          )}
         </div>
       )}
     </motion.div>
@@ -2490,7 +2767,7 @@ const Notifications = ({ notifications, onMarkAsRead, onBack, onOrderClick, onSh
   onMarkAsRead: (id: string) => void,
   onBack: () => void,
   onOrderClick: (orderId: string) => void,
-  onShowSupport: () => void
+  onShowSupport?: () => void
 }) => {
   const [activeTab, setActiveTab] = useState<'current' | 'history'>('current');
   const [filterType, setFilterType] = useState<Notification['type'] | 'all'>('all');
@@ -2551,7 +2828,7 @@ const Notifications = ({ notifications, onMarkAsRead, onBack, onOrderClick, onSh
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+      <div className="flex-1 overflow-y-auto page-gutters py-6 space-y-4">
         {displayNotifications.map(notif => (
           <div 
             key={notif.id} 
@@ -2579,15 +2856,17 @@ const Notifications = ({ notifications, onMarkAsRead, onBack, onOrderClick, onSh
         )}
       </div>
 
-      <div className="p-6 border-t border-slate-100">
-        <button 
-          onClick={onShowSupport}
-          className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 active:scale-95 transition-transform"
-        >
-          <MessageSquare size={20} />
-          Написать в поддержку
-        </button>
-      </div>
+      {onShowSupport && (
+        <div className="page-gutters py-6 border-t border-slate-100">
+          <button 
+            onClick={onShowSupport}
+            className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 active:scale-95 transition-transform"
+          >
+            <MessageSquare size={20} />
+            Написать в поддержку
+          </button>
+        </div>
+      )}
     </motion.div>
   );
 };
@@ -2603,14 +2882,35 @@ const SettingsPage = ({ onBack, user, onUpdateUser, lang, setLang, onShowSupport
   const [activeSubPage, setActiveSubPage] = useState<string | null>(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [editName, setEditName] = useState(user.name);
-  const [editPhone, setEditPhone] = useState('8 (999) 123-45-67'); // Mock phone
+  const [editPhone, setEditPhone] = useState(user.phone || '');
+    useEffect(() => {
+    setEditName(user.name || '');
+    setEditPhone(user.phone || '');
+  }, [user]);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const { uploadAvatar } = await import('./firebase');
+      const url = await uploadAvatar(user.id, file);
+      onUpdateUser({ ...user, avatar: url });
+    } catch (err) {
+      console.error('Avatar upload error:', err);
+    }
+  };
 
   const t = TRANSLATIONS[lang];
 
   const handleSavePersonalData = () => {
-    onUpdateUser({ ...user, name: editName });
+    onUpdateUser({
+      ...user,
+      name: editName.trim(),
+      phone: editPhone
+    });
     setActiveSubPage(null);
   };
 
@@ -2624,7 +2924,18 @@ const SettingsPage = ({ onBack, user, onUpdateUser, lang, setLang, onShowSupport
               <div className="flex flex-col items-center gap-4 mb-8">
                 <div className="relative">
                   <img src={user.avatar} alt={user.name} className="w-24 h-24 rounded-full border-4 border-slate-50 shadow-lg" referrerPolicy="no-referrer" />
-                  <button className="absolute bottom-0 right-0 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-md">
+                  <input
+                    ref={avatarInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleAvatarChange}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => avatarInputRef.current?.click()}
+                    className="absolute bottom-0 right-0 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-md"
+                  >
                     <Camera size={16} />
                   </button>
                 </div>
@@ -2641,10 +2952,9 @@ const SettingsPage = ({ onBack, user, onUpdateUser, lang, setLang, onShowSupport
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 tracking-wider">{t.phone}</label>
-                  <input 
-                    type="text" 
+                  <PhoneInput
                     value={editPhone} 
-                    onChange={(e) => setEditPhone(e.target.value)}
+                    onChange={setEditPhone}
                     className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
@@ -2666,13 +2976,13 @@ const SettingsPage = ({ onBack, user, onUpdateUser, lang, setLang, onShowSupport
               <Logo size={80} />
               <div className="space-y-2">
                 <p className="text-xl font-black">ГрузОК</p>
-                <p className="text-slate-400 text-sm">Версия 1.0.0</p>
+                <p className="text-slate-400 text-sm">{t.version} 1.0.0</p>
               </div>
               <p className="text-slate-600 leading-relaxed">
                 {t.aboutText}
               </p>
               <div className="w-full pt-8 border-t border-slate-100">
-                <p className="text-xs text-slate-400">© 2026 GruzOK Inc. Все права защищены.</p>
+                <p className="text-xs text-slate-400">© 2026 GruzOK Inc. {t.copyright}</p>
               </div>
             </div>
           </motion.div>
@@ -2689,16 +2999,18 @@ const SettingsPage = ({ onBack, user, onUpdateUser, lang, setLang, onShowSupport
                 </div>
               ))}
               
-              <div className="pt-8 text-center space-y-4">
-                <p className="text-sm text-slate-400">Не нашли ответ на свой вопрос?</p>
-                <button 
-                  onClick={onShowSupport}
-                  className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 active:scale-95 transition-transform"
-                >
-                  <MessageSquare size={20} />
-                  Написать в поддержку
-                </button>
-              </div>
+              {user.role !== 'dispatcher' && (
+                <div className="pt-8 text-center space-y-4">
+                  <p className="text-sm text-slate-400">{t.noFaqAnswer}</p>
+                  <button 
+                    onClick={onShowSupport}
+                    className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 active:scale-95 transition-transform"
+                  >
+                    <MessageSquare size={20} />
+                    {t.writeSupport}
+                  </button>
+                </div>
+              )}
             </div>
           </motion.div>
         );
@@ -2715,7 +3027,7 @@ const SettingsPage = ({ onBack, user, onUpdateUser, lang, setLang, onShowSupport
       className="absolute inset-0 bg-white z-[80] flex flex-col"
     >
       <Header title={t.settings} showBack onBack={onBack} />
-      <div className="flex-1 overflow-y-auto p-6 space-y-8">
+      <div className="flex-1 overflow-y-auto page-gutters py-6 space-y-8">
         <section>
           <h3 className="text-[10px] font-bold text-slate-400 uppercase mb-4 tracking-wider">{t.account}</h3>
           <div className="space-y-4">
@@ -2779,16 +3091,18 @@ const SettingsPage = ({ onBack, user, onUpdateUser, lang, setLang, onShowSupport
         <section>
           <h3 className="text-[10px] font-bold text-slate-400 uppercase mb-4 tracking-wider">{t.support}</h3>
           <div className="space-y-2">
-            <button 
-              onClick={onShowSupport}
-              className="w-full flex items-center justify-between p-4 bg-blue-50 rounded-2xl border border-blue-100 text-blue-600"
-            >
-              <div className="flex items-center gap-3">
-                <MessageSquare size={20} />
-                <span className="font-bold">Чат с поддержкой</span>
-              </div>
-              <ChevronRight size={20} />
-            </button>
+            {user.role !== 'dispatcher' && (
+              <button 
+                onClick={onShowSupport}
+                className="w-full flex items-center justify-between p-4 bg-blue-50 rounded-2xl border border-blue-100 text-blue-600"
+              >
+                <div className="flex items-center gap-3">
+                  <MessageSquare size={20} />
+                  <span className="font-bold">{t.supportChat}</span>
+                </div>
+                <ChevronRight size={20} />
+              </button>
+            )}
             <button 
               onClick={() => setActiveSubPage('faq')}
               className="w-full flex items-center justify-between p-4 bg-white rounded-2xl border border-slate-100"
@@ -2834,17 +3148,81 @@ const DispatcherAdmin = ({ user, orders, chats, workers, onOrderClick, onWorkerC
   onOpenChat: (participantId: string, role: string, orderId?: string) => void
 }) => {
   const [activeView, setActiveView] = useState<'orders' | 'workers' | 'dashboard' | 'chats'>('orders');
+  const [orderStatusFilter, setOrderStatusFilter] = useState<Order['status'] | 'all'>('all');
   
   const pendingOrders = orders.filter(o => o.status === 'pending_negotiation');
   const openOrders = orders.filter(o => o.status === 'open');
   const activeOrders = orders.filter(o => o.status === 'in-progress');
   const completedOrders = orders.filter(o => o.status === 'completed');
+  const visiblePendingOrders = orderStatusFilter === 'all' || orderStatusFilter === 'pending_negotiation' ? pendingOrders : [];
+  const visibleOpenOrders = orderStatusFilter === 'all' || orderStatusFilter === 'open' ? openOrders : [];
+  const visibleActiveOrders = orderStatusFilter === 'all' || orderStatusFilter === 'in-progress' ? activeOrders : [];
+  const visibleCompletedOrders = orderStatusFilter === 'all' || orderStatusFilter === 'completed' ? completedOrders : [];
+  const visibleOrdersCount = visiblePendingOrders.length + visibleOpenOrders.length + visibleActiveOrders.length + visibleCompletedOrders.length;
 
-  const displayWorkers = workers.length > 0 ? workers : Object.values(MOCK_WORKER_PROFILES);
+  const displayWorkers = workers.filter(w => w.role === 'worker');
   const workersMap = displayWorkers.reduce((acc, w) => {
-    acc[w.id] = w;
+    const normalizedWorker = { ...w, phone: w.phone || w.phoneNumber || w.contactPhone || '' };
+    acc[w.id] = normalizedWorker;
+    if (w.uid) acc[w.uid] = normalizedWorker;
     return acc;
   }, {} as Record<string, any>);
+  const ordersMap = orders.reduce((acc, order) => {
+    acc[order.id] = order;
+    return acc;
+  }, {} as Record<string, Order>);
+
+  const dispatcherChats = useMemo(() => {
+    const chatEntries = chats
+      .map((chat) => {
+        const storedRole = chat.participantRole;
+        const participantId =
+          storedRole === 'customer' ? chat.customerId :
+          storedRole === 'worker' ? chat.workerId :
+          chat.customerId && chat.customerId !== user.id ? chat.customerId :
+          chat.workerId && chat.workerId !== user.id ? chat.workerId :
+          undefined;
+
+        if (!participantId || participantId === 'support') return null;
+
+        const participantRole =
+          storedRole === 'customer' || storedRole === 'worker'
+            ? storedRole
+            : chat.customerId === participantId
+              ? 'customer'
+              : 'worker';
+        const order = chat.orderId && !['direct', 'manual', 'support_order'].includes(chat.orderId)
+          ? ordersMap[chat.orderId]
+          : undefined;
+        const key = order
+          ? `${order.id}_${participantRole}_${participantId}`
+          : `direct_${participantRole}_${participantId}`;
+
+        return { chat, participantId, participantRole, order, key };
+      })
+      .filter(Boolean) as Array<{
+        chat: Chat;
+        participantId: string;
+        participantRole: 'customer' | 'worker';
+        order?: Order;
+        key: string;
+      }>;
+
+    const deduped = new Map<string, typeof chatEntries[number]>();
+
+    chatEntries.forEach((entry) => {
+      const existing = deduped.get(entry.key);
+      const entryTime = entry.chat.lastMessageAt?.toMillis?.() || 0;
+      const existingTime = existing?.chat.lastMessageAt?.toMillis?.() || 0;
+      if (!existing || entryTime >= existingTime) {
+        deduped.set(entry.key, entry);
+      }
+    });
+
+    return Array.from(deduped.values()).sort((a, b) =>
+      (b.chat.lastMessageAt?.toMillis?.() || 0) - (a.chat.lastMessageAt?.toMillis?.() || 0)
+    );
+  }, [chats, ordersMap, user.id]);
 
   // Dashboard Data
   const categoryData = Object.entries(
@@ -2881,28 +3259,26 @@ const DispatcherAdmin = ({ user, orders, chats, workers, onOrderClick, onWorkerC
 
   return (
     <div className="flex-1 flex flex-col bg-slate-50 overflow-hidden">
-      <div className="bg-white border-b border-slate-100 p-6">
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h2 className="text-2xl font-black text-slate-900 tracking-tight">Панель управления 🎧</h2>
-            <p className="text-slate-500 text-sm">Управление логистикой и кадрами</p>
-          </div>
-          <div className="flex gap-1 bg-slate-100 p-1 rounded-xl overflow-x-auto no-scrollbar">
-            {[
-              { id: 'orders', label: 'Заказы' },
-              { id: 'workers', label: 'Грузчики' },
-              { id: 'dashboard', label: 'Аналитика' },
-              { id: 'chats', label: 'Чаты' }
-            ].map(tab => (
-              <button 
-                key={tab.id}
-                onClick={() => setActiveView(tab.id as any)}
-                className={`px-3 py-2 rounded-lg text-[10px] font-bold transition-all whitespace-nowrap ${activeView === tab.id ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
+      <div className="bg-white border-b border-slate-100 page-gutters py-6">
+        <div className="mb-4">
+          <h2 className="text-2xl font-black text-slate-900 tracking-tight">Панель управления 🎧</h2>
+          <p className="text-slate-500 text-sm">Управление логистикой и кадрами</p>
+        </div>
+        <div className="flex gap-1 bg-slate-100 p-1 rounded-xl overflow-x-auto no-scrollbar mb-6">
+          {[
+            { id: 'orders', label: 'Заказы' },
+            { id: 'workers', label: 'Грузчики' },
+            { id: 'dashboard', label: 'Аналитика' },
+            { id: 'chats', label: 'Чаты' }
+          ].map(tab => (
+            <button 
+              key={tab.id}
+              onClick={() => setActiveView(tab.id as any)}
+              className={`px-3 py-2 rounded-lg text-[10px] font-bold transition-all whitespace-nowrap ${activeView === tab.id ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
         {activeView !== 'dashboard' && activeView !== 'chats' && (
@@ -2920,37 +3296,62 @@ const DispatcherAdmin = ({ user, orders, chats, workers, onOrderClick, onWorkerC
             ))}
           </div>
         )}
+
+        {activeView === 'orders' && (
+          <div className="mt-4 flex gap-2 overflow-x-auto no-scrollbar">
+            {[
+              { id: 'all', label: 'Все' },
+              { id: 'pending_negotiation', label: 'На согласовании' },
+              { id: 'open', label: 'Открытые' },
+              { id: 'in-progress', label: 'В работе' },
+              { id: 'completed', label: 'Завершенные' },
+            ].map(filter => (
+              <button
+                key={filter.id}
+                onClick={() => setOrderStatusFilter(filter.id as Order['status'] | 'all')}
+                className={`px-4 py-2 rounded-full text-[10px] font-bold whitespace-nowrap border transition-all ${
+                  orderStatusFilter === filter.id
+                    ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+                    : 'bg-white border-slate-100 text-slate-500'
+                }`}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-6">
         {activeView === 'orders' ? (
           <div className="space-y-8">
-            {pendingOrders.length > 0 && (
+            {visiblePendingOrders.length > 0 && (
               <section>
                 <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
                   <Clock size={18} className="text-amber-500" />
                   Требуют согласования
                 </h3>
                 <div className="grid gap-4">
-                  {pendingOrders.map(order => (
+                  {visiblePendingOrders.map(order => (
                     <OrderCard key={order.id} order={order} onClick={onOrderClick} role="dispatcher" />
                   ))}
                 </div>
               </section>
             )}
 
-            <section>
-              <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
-                <Navigation size={18} className="text-blue-500" />
-                Активные и открытые
-              </h3>
-              <div className="grid gap-4">
-                {[...openOrders, ...activeOrders].map(order => (
-                  <div key={order.id} className="relative group">
+            {(visibleOpenOrders.length > 0 || visibleActiveOrders.length > 0) && (
+              <section>
+                <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
+                  <Navigation size={18} className="text-blue-500" />
+                  Активные и открытые
+                </h3>
+                <div className="grid gap-4">
+                  {[...visibleOpenOrders, ...visibleActiveOrders].map(order => (
+                  <div key={order.id} className="relative">
                     <OrderCard order={order} workers={workers} onClick={onOrderClick} role="dispatcher" />
                     {order.status === 'open' && order.candidates && order.candidates.length > 0 && (
-                      <div className="absolute top-4 right-4 flex -space-x-2">
-                        {order.candidates.map(cid => (
+                      <div className="absolute bottom-8 right-4 flex -space-x-2 pointer-events-none">
+                        {order.candidates.filter(cid => !!cid).map(cid => (
                           <img 
                             key={cid} 
                             src={workersMap[cid]?.avatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=fallback'} 
@@ -2964,9 +3365,31 @@ const DispatcherAdmin = ({ user, orders, chats, workers, onOrderClick, onWorkerC
                       </div>
                     )}
                   </div>
-                ))}
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {visibleCompletedOrders.length > 0 && (
+              <section>
+                <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
+                  <CheckCircle2 size={18} className="text-emerald-500" />
+                  Завершенные
+                </h3>
+                <div className="grid gap-4">
+                  {visibleCompletedOrders.map(order => (
+                    <OrderCard key={order.id} order={order} workers={workers} onClick={onOrderClick} role="dispatcher" />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {visibleOrdersCount === 0 && (
+              <div className="py-20 text-center text-slate-400">
+                <Filter size={32} className="mx-auto mb-3 opacity-30" />
+                <p className="font-semibold">Заказов с таким статусом нет</p>
               </div>
-            </section>
+            )}
           </div>
         ) : activeView === 'workers' ? (
           <div className="grid gap-4">
@@ -2986,7 +3409,7 @@ const DispatcherAdmin = ({ user, orders, chats, workers, onOrderClick, onWorkerC
                     <div className="flex items-center gap-2 text-xs text-slate-500">
                       <Star size={12} className="text-amber-400 fill-amber-400" />
                       <span className="font-bold">{worker.rating}</span>
-                      <span>• {worker.reviewsCount} отзывов</span>
+                      <span>• {getReviewsCount(worker)} отзывов</span>
                     </div>
                   </div>
                 </div>
@@ -2994,7 +3417,9 @@ const DispatcherAdmin = ({ user, orders, chats, workers, onOrderClick, onWorkerC
                   <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-lg ${worker.isOnline ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-50 text-slate-400'}`}>
                     {worker.isOnline ? 'В сети' : 'Оффлайн'}
                   </span>
-                  <p className="text-xs text-slate-400 mt-1">Средний ответ: {worker.responseTime}</p>
+                  {worker.responseTime && (
+                    <p className="text-xs text-slate-400 mt-1">Средний ответ: {worker.responseTime}</p>
+                  )}
                 </div>
               </div>
             ))}
@@ -3065,38 +3490,37 @@ const DispatcherAdmin = ({ user, orders, chats, workers, onOrderClick, onWorkerC
           </div>
         ) : (
           <div className="space-y-4">
-            {chats.length > 0 ? (
-              chats.map(chat => {
-                let otherUserId = '';
-                if (user.role === 'dispatcher') {
-                  otherUserId = chat.customerId !== user.id ? chat.customerId! : chat.workerId!;
-                } else {
-                  otherUserId = chat.customerId === user.id ? chat.workerId! : (chat.dispatcherId || chat.customerId!);
-                }
-                
-                const otherUserProfile = MOCK_WORKER_PROFILES[otherUserId];
-                const otherUser = otherUserProfile || (otherUserId === MOCK_USER_CUSTOMER.id ? MOCK_USER_CUSTOMER : MOCK_USER_DISPATCHER);
-                const otherUserRole = otherUserProfile ? 'worker' : (otherUserId === MOCK_USER_CUSTOMER.id ? 'customer' : 'dispatcher');
-                
+            {dispatcherChats.length > 0 ? (
+              dispatcherChats.map(({ chat, participantId, participantRole, order }) => {
+                const profile = workers.find(w => w.id === participantId || w.uid === participantId);
+                const roleLabel = participantRole === 'customer' ? 'Клиент' : 'Исполнитель';
+                const participantName = chat.otherUserName || profile?.name || roleLabel;
+                const participantAvatar = chat.otherUserAvatar || profile?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${participantId}`;
+                const title = order?.title || participantName;
+                const subtitle = order
+                  ? `${roleLabel}: ${participantName}`
+                  : `${roleLabel} · прямой чат`;
+
                 return (
                   <div 
                     key={chat.id} 
-                    onClick={() => onOpenChat(otherUserId, otherUserRole, chat.orderId !== 'manual' ? chat.orderId : undefined)}
+                    onClick={() => onOpenChat(participantId, participantRole, order?.id)}
                     className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4 cursor-pointer hover:border-blue-200 transition-colors"
                   >
-                    <img src={otherUser.avatar || 'https://picsum.photos/seed/user/50'} className="w-12 h-12 rounded-full object-cover" />
+                    <img src={participantAvatar || 'https://picsum.photos/seed/user/50'} className="w-12 h-12 rounded-full object-cover" />
                     <div className="flex-1">
                       <div className="flex justify-between items-center mb-1">
-                        <h4 className="font-bold text-slate-900">{otherUser.name || 'Пользователь'}</h4>
+                        <h4 className="font-bold text-slate-900 line-clamp-1">{title}</h4>
                         <span className="text-[10px] text-slate-400">
                           {chat.lastMessageAt ? new Date(chat.lastMessageAt.toMillis()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                         </span>
                       </div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest line-clamp-1 mb-1">{subtitle}</p>
                       <div className="flex items-center justify-between">
                         <p className="text-xs text-slate-500 line-clamp-1">{chat.lastMessage || 'Начать чат...'}</p>
-                        {chat.orderId !== 'manual' && (
+                        {order && (
                           <span className="text-[8px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-bold uppercase tracking-tighter">
-                            Заказ #{chat.orderId.slice(-4)}
+                            Заказ #{order.id.slice(-4)}
                           </span>
                         )}
                       </div>
@@ -3117,9 +3541,21 @@ const DispatcherAdmin = ({ user, orders, chats, workers, onOrderClick, onWorkerC
   );
 };
 
-const ReviewModal = ({ isOpen, onClose, onSubmit, targetName }: { isOpen: boolean, onClose: () => void, onSubmit: (rating: number, text: string) => void, targetName: string }) => {
-  const [rating, setRating] = useState(5);
+const ReviewModal = ({ isOpen, onClose, onSubmit, targetName, lang = 'ru' }: { isOpen: boolean, onClose: () => void, onSubmit: (rating: number, text: string) => Promise<boolean | void> | boolean | void, targetName: string, lang?: AppLang }) => {
+  const [rating, setRating] = useState(0);
   const [text, setText] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const reviewText = {
+    title: lang === 'en' ? 'Leave a review' : 'Оставить отзыв',
+    intro: lang === 'en' ? 'Please rate' : 'Пожалуйста, оцените работу',
+    hint: lang === 'en' ? 'Your review will help other users make the right choice.' : 'Ваш отзыв поможет другим пользователям сделать правильный выбор.',
+    comment: lang === 'en' ? 'Comment' : 'Комментарий',
+    placeholder: lang === 'en' ? 'Write a few words about your experience...' : 'Напишите пару слов о впечатлениях...',
+    submit: lang === 'en' ? 'Submit review' : 'Отправить отзыв',
+    submitting: lang === 'en' ? 'Submitting...' : 'Отправляем...',
+    error: lang === 'en' ? 'Could not save the review. Please try again.' : 'Не удалось сохранить отзыв. Попробуйте еще раз.',
+  };
 
   if (!isOpen) return null;
 
@@ -3137,15 +3573,15 @@ const ReviewModal = ({ isOpen, onClose, onSubmit, targetName }: { isOpen: boolea
         className="bg-white w-full max-w-md rounded-t-[32px] sm:rounded-[32px] p-8 shadow-2xl"
       >
         <div className="flex justify-between items-center mb-6">
-          <h3 className="text-xl font-black text-slate-900 tracking-tight">Оставить отзыв</h3>
+          <h3 className="text-xl font-black text-slate-900 tracking-tight">{reviewText.title}</h3>
           <button onClick={onClose} className="p-2 bg-slate-100 rounded-full text-slate-400 hover:text-slate-600 transition-colors">
             <X size={20} />
           </button>
         </div>
 
         <p className="text-slate-500 text-sm mb-8 leading-relaxed">
-          Пожалуйста, оцените работу <span className="font-bold text-slate-900">{targetName}</span>. 
-          Ваш отзыв поможет другим пользователям сделать правильный выбор.
+          {reviewText.intro} <span className="font-bold text-slate-900">{targetName}</span>. 
+          {reviewText.hint}
         </p>
 
         <div className="flex justify-center gap-3 mb-10">
@@ -3165,20 +3601,52 @@ const ReviewModal = ({ isOpen, onClose, onSubmit, targetName }: { isOpen: boolea
         </div>
 
         <div className="space-y-2 mb-8">
-          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Комментарий</label>
+          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{reviewText.comment}</label>
           <textarea 
             className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all min-h-[120px] resize-none"
-            placeholder="Напишите пару слов о впечатлениях..."
+            placeholder={reviewText.placeholder}
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              setText(e.target.value);
+              setSubmitError('');
+            }}
           />
         </div>
 
-        <button 
-          onClick={() => onSubmit(rating, text)}
-          className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold text-lg shadow-lg shadow-blue-200 active:scale-95 transition-all"
+        {submitError && (
+          <div className="mb-4 bg-red-50 text-red-600 p-3 rounded-xl text-xs font-bold border border-red-100">
+            {submitError}
+          </div>
+        )}
+
+        <button
+          disabled={rating === 0 || text.trim().length === 0 || isSubmitting}
+          onClick={async () => {
+            if (rating === 0 || text.trim().length === 0 || isSubmitting) return;
+            setIsSubmitting(true);
+            setSubmitError('');
+            try {
+              const result = await onSubmit(rating, text);
+              if (result === false) {
+                setSubmitError(reviewText.error);
+                return;
+              }
+              setRating(0);
+              setText('');
+            } catch (error) {
+              console.error('Review submit failed:', error);
+              setSubmitError(reviewText.error);
+            } finally {
+              setIsSubmitting(false);
+            }
+          }}
+          className={`w-full py-4 rounded-2xl font-bold text-lg shadow-lg active:scale-95 transition-all ${
+            rating === 0 || text.trim().length === 0 || isSubmitting
+              ? 'bg-slate-200 text-slate-400 shadow-none'
+              : 'bg-blue-600 text-white shadow-blue-200'
+          }`}
         >
-          Отправить отзыв
+          {isSubmitting ? reviewText.submitting : reviewText.submit}
         </button>
       </motion.div>
     </motion.div>
@@ -3190,13 +3658,14 @@ interface OrderDetailsProps {
   orders: Order[];
   workers: any[];
   role: UserRole;
+  lang: AppLang;
   currentUserId: string;
   onBack: () => void;
   onOrderClick: (order: Order) => void;
   onUpdateStatus: (orderId: string, status: Order['status']) => void;
   onUpdateWorkerStatus: (orderId: string, workerId: string, status: AssignedWorker['status']) => void;
   onNegotiate: (orderId: string, negotiatedBudget: number, commission: number) => void;
-  onReview: (orderId: string, rating: number, text: string) => void;
+  onReview: (orderId: string, rating: number, text: string) => Promise<boolean | void> | boolean | void;
   onAssignWorker: (orderId: string, workerIds: string | string[]) => void;
   onUnassignWorker?: (orderId: string, workerId: string) => void;
   onDeleteOrder?: (orderId: string) => void;
@@ -3206,6 +3675,7 @@ interface OrderDetailsProps {
   onShowSupport: () => void;
   viewingWorkerId: string | null;
   setViewingWorkerId: (id: string | null) => void;
+  onCompleteOrder?: (orderId: string) => void;
 }
 
 const OrderDetails = ({ 
@@ -3213,6 +3683,7 @@ const OrderDetails = ({
   orders,
   workers,
   role, 
+  lang,
   currentUserId,
   onBack, 
   onOrderClick,
@@ -3228,75 +3699,222 @@ const OrderDetails = ({
   onBid,
   onShowSupport,
   viewingWorkerId, 
-  setViewingWorkerId 
+  setViewingWorkerId,
+  onCompleteOrder
 }: OrderDetailsProps) => {
+  const t = TRANSLATIONS[lang];
   const [selectedWorker, setSelectedWorker] = useState<string | null>(null);
   const [negotiatedBudget, setNegotiatedBudget] = useState(order.budget);
   const [commission, setCommission] = useState(order.commission || Math.round(order.budget * 0.1));
-  const [workerLocation, setWorkerLocation] = useState<{lat: number, lng: number} | null>(null);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
   const [selectedWorkers, setSelectedWorkers] = useState<string[]>(order.assignedWorkers?.map(w => w.id) || []);
+  const [customerProfile, setCustomerProfile] = useState<any | null>(null);
+  const maxAssignedWorkers = Math.max(1, order.workersCount || 1);
+  const assignedWorkersList = order.assignedWorkers || [];
+  const assignedWorkerIds = new Set(assignedWorkersList.map(worker => worker.id));
+  const assignedSlotsCount = assignedWorkersList.length;
+  const hasFreeWorkerSlots = assignedSlotsCount < maxAssignedWorkers;
+  const availableCandidateIds = (order.candidates || []).filter(workerId => !!workerId && !assignedWorkerIds.has(workerId));
 
-  const displayWorkers = workers.length > 0 ? workers : Object.values(MOCK_WORKER_PROFILES);
+  const displayWorkers = workers.filter(w => w.role === 'worker');
   const workersMap = displayWorkers.reduce((acc, w) => {
-    acc[w.id] = w;
+    const normalizedWorker = { ...w, phone: w.phone || w.phoneNumber || w.contactPhone || '' };
+    acc[w.id] = normalizedWorker;
+    if (w.uid) acc[w.uid] = normalizedWorker;
     return acc;
   }, {} as Record<string, any>);
 
+  const assignedWorkerId =
+    order.workerId || order.assignedWorkers?.[0]?.id || String(selectedWorker || '');
+
+  const assignedWorker = workersMap?.[assignedWorkerId];
+
+  useEffect(() => {
+    setSelectedWorkers(assignedWorkersList.map(worker => worker.id).slice(0, maxAssignedWorkers));
+  }, [order.id, order.assignedWorkers, maxAssignedWorkers]);
+
+  // For worker: contact is the customer. For customer: contact is the assigned worker.
+  // Dispatcher has separate chat buttons above; no contact block needed.
+  const contactId = role === 'worker' ? order.customerId : assignedWorkerId;
+  const contactRole = role === 'worker' ? 'customer' : 'worker';
+
+  const contactName =
+    role === 'worker'
+      ? (customerProfile?.name || customerProfile?.fullName || (lang === 'en' ? 'Customer' : 'Заказчик'))
+      : (assignedWorker?.name || assignedWorker?.fullName || (lang === 'en' ? 'Worker' : 'Исполнитель'));
+
+  const contactPhoneRaw =
+    role === 'worker'
+      ? (customerProfile?.phone || customerProfile?.phoneNumber || customerProfile?.contactPhone || '')
+      : (assignedWorker?.phone || assignedWorker?.phoneNumber || assignedWorker?.contactPhone || '');
+
+  const contactPhoneFormatted = contactPhoneRaw
+    ? formatPhoneNumber(contactPhoneRaw)
+    : (lang === 'en' ? 'Phone not specified' : 'Телефон не указан');
+
+  const contactPhoneHref = contactPhoneRaw
+    ? `+${String(contactPhoneRaw).replace(/\D/g, '')}`
+    : '#';
+
+  useEffect(() => {
+    if (role !== 'worker' || !order.customerId) {
+      setCustomerProfile(null);
+      return;
+    }
+
+    const unsub = onSnapshot(doc(db, 'users', order.customerId), (snapshot) => {
+      if (snapshot.exists()) {
+        setCustomerProfile({ id: snapshot.id, ...snapshot.data() });
+      } else {
+        setCustomerProfile(null);
+      }
+    });
+
+    return () => unsub();
+  }, [role, order.customerId]);
+
   const needsReview = order.status === 'completed' && 
-    ((role === 'customer' && !order.customerReviewed) || (role === 'worker' && !order.workerReviewed));
+    ((role === 'customer' && !order.customerReviewed) || 
+    (role === 'worker' && !order.workerReviewed));
 
   useEffect(() => {
     if (needsReview) {
       setShowReviewModal(true);
     }
-  }, [needsReview]);
+  }, [order.id, order.status]);
 
-  const handleReviewSubmit = (rating: number, text: string) => {
-    onReview(order.id, rating, text);
+  const handleReviewSubmit = async (rating: number, text: string) => {
+    const result = await onReview(order.id, rating, text);
+    if (result === false) return false;
     setShowReviewModal(false);
+    return true;
   };
 
   const targetName = role === 'customer' 
-    ? (workersMap[order.workerId || 'u2']?.name || 'Исполнитель')
-    : 'Заказчик';
+    ? (workersMap[assignedWorkerId]?.name || (lang === 'en' ? 'Worker' : 'Исполнитель'))
+    : (lang === 'en' ? 'Customer' : 'Заказчик');
 
-  useEffect(() => {
-    if (order.status === 'in-progress' && order.lat && order.lng) {
-      // Initialize worker location slightly away from order if not set
-      if (!workerLocation) {
-        setWorkerLocation({
-          lat: order.lat - 0.005,
-          lng: order.lng - 0.005
-        });
-      }
+  const od = {
+    total: lang === 'en' ? 'Total' : 'Всего',
+    budgetApproval: lang === 'en' ? 'Budget approval' : 'Согласование бюджета',
+    finalBudget: lang === 'en' ? 'Final budget from customer' : 'Итоговый бюджет (от клиента)',
+    dispatcherFee: lang === 'en' ? 'Dispatcher fee' : 'Комиссия диспетчера',
+    workerPayout: lang === 'en' ? 'Worker payout:' : 'Выплата исполнителю:',
+    approveAndPublish: lang === 'en' ? 'Approve and publish' : 'Согласовать и опубликовать',
+    dateTime: lang === 'en' ? 'Date and time' : 'Дата и Время',
+    notSpecified: lang === 'en' ? 'Not specified' : 'Не указано',
+    peopleShort: lang === 'en' ? 'people' : 'чел.',
+    manageWorkers: lang === 'en' ? 'Manage workers' : 'Управление исполнителями',
+    chatWithCustomer: lang === 'en' ? 'Chat with customer' : 'Чат с клиентом',
+    chatWithWorker: lang === 'en' ? 'Chat with worker' : 'Чат с исполнителем',
+    noWorkersAssigned: lang === 'en' ? 'No workers assigned yet' : 'Исполнители еще не назначены',
+    assignLoaders: lang === 'en' ? 'Assign loaders' : 'Назначить грузчиков',
+    acceptedOrder: lang === 'en' ? 'Accepted order' : 'Приняли заказ',
+    chooseWorkers: lang === 'en' ? 'Choose workers' : 'Выбор исполнителей',
+    selected: lang === 'en' ? 'Selected' : 'Выбрано',
+    online: lang === 'en' ? 'Online' : 'В сети',
+    offline: lang === 'en' ? 'Offline' : 'Оффлайн',
+    confirmSelection: lang === 'en' ? 'Confirm selection' : 'Подтвердить выбор',
+    statusHistory: lang === 'en' ? 'Change history' : 'История изменений',
+    emptyHistory: lang === 'en' ? 'Change history is empty' : 'История изменений пуста',
+    changedStatusTo: lang === 'en' ? 'Changed status to:' : 'Изменил статус на:',
+    changedBy: lang === 'en' ? 'Changed by:' : 'Изменил:',
+    customer: lang === 'en' ? 'Customer' : 'Заказчик',
+    worker: lang === 'en' ? 'Worker' : 'Исполнитель',
+    dispatcher: lang === 'en' ? 'Dispatcher' : 'Диспетчер',
+    system: lang === 'en' ? 'System' : 'Система',
+    assignedLoaders: lang === 'en' ? 'Assigned loaders' : 'Назначенные грузчики',
+    phoneNotSpecified: lang === 'en' ? 'Phone not specified' : 'Телефон не указан',
+    go: lang === 'en' ? 'Go' : 'В путь',
+    arrived: lang === 'en' ? 'On site' : 'На месте',
+    finish: lang === 'en' ? 'Finish' : 'Закончил',
+    workerOnWay: lang === 'en' ? 'Worker on the way' : 'Исполнитель в пути',
+    mapUnavailable: lang === 'en' ? 'Map unavailable' : 'Карта недоступна',
+    workerIsComing: lang === 'en' ? 'Worker is coming to you' : 'Исполнитель в пути к вам',
+    arrivalIn: lang === 'en' ? 'Arrival in' : 'Прибытие через',
+    lessThanMinute: lang === 'en' ? '< 1 min' : '< 1 мин',
+    hourShort: lang === 'en' ? 'h' : 'ч',
+    minuteShort: lang === 'en' ? 'min' : 'мин',
+    workerAtPlaceTitle: lang === 'en' ? 'Worker is on site' : 'Исполнитель на месте',
+    workerAtPlaceText: lang === 'en' ? 'The order can now be started' : 'Можно начинать выполнение заказа',
+    customerContact: lang === 'en' ? 'Customer contact' : 'Контакт заказчика',
+    workerContact: lang === 'en' ? 'Worker contact' : 'Контакт исполнителя',
+    profile: lang === 'en' ? 'Profile' : 'Профиль',
+    call: lang === 'en' ? 'Call' : 'Позвонить',
+    contactHint: lang === 'en' ? 'Contact them to clarify details' : 'Свяжитесь для уточнения деталей',
+    apply: lang === 'en' ? 'Apply for order' : 'Откликнуться на заказ',
+    applied: lang === 'en' ? 'You applied' : 'Вы откликнулись',
+    completeOrder: lang === 'en' ? 'Complete order' : 'Завершить заказ',
+    orderCompleted: lang === 'en' ? 'Order completed successfully!' : 'Заказ успешно выполнен!',
+    deleteOrder: lang === 'en' ? 'Delete order' : 'Удалить заказ',
+    assignedExecutors: lang === 'en' ? 'Assigned workers' : 'Назначенные исполнители',
+    remove: lang === 'en' ? 'Remove' : 'Отстранить',
+    candidates: lang === 'en' ? 'Applications' : 'Отклики',
+    free: lang === 'en' ? 'free' : 'свободно',
+    choose: lang === 'en' ? 'Choose' : 'Выбрать',
+    noCandidates: lang === 'en' ? 'No available applications yet' : 'Пока нет доступных откликов',
+    allSelected: lang === 'en' ? 'All workers selected. Waiting for confirmation.' : 'Все исполнители выбраны! Ожидайте подтверждения.',
+  };
 
-      const interval = setInterval(() => {
-        setWorkerLocation(prev => {
-          if (!prev) return null;
-          // Move 5% closer to the target each step for smoother animation
-          const newLat = prev.lat + (order.lat! - prev.lat) * 0.05;
-          const newLng = prev.lng + (order.lng! - prev.lng) * 0.05;
-          
-          // If very close, just stay there
-          if (Math.abs(newLat - order.lat!) < 0.00001 && Math.abs(newLng - order.lng!) < 0.00001) {
-            return { lat: order.lat!, lng: order.lng! };
-          }
-          
-          return { lat: newLat, lng: newLng };
-        });
-      }, 2000);
+  // ВРЕМЕННО ОТКЛЮЧЕНО — превышает квоту Firebase
+  // useEffect(() => {
+  //   if (role !== 'worker') return;
+  //   if (!currentUserId) return;
 
-      return () => clearInterval(interval);
-    }
-  }, [order.status, order.lat, order.lng]);
+  //   const currentAssignedWorker = (order.assignedWorkers || []).find(w => w.id === currentUserId);
+  //   if (!currentAssignedWorker) return;
+  //   if (currentAssignedWorker.status !== 'on-way') return;
+
+  //   if (!navigator.geolocation) return;
+
+  //   let lastUpdate = 0;
+
+  //   const watchId = navigator.geolocation.watchPosition(
+  //     async (position) => {
+  //       const now = Date.now();
+  //       if (now - lastUpdate < 15000) return; // не чаще раз в 15 сек
+  //       lastUpdate = now;
+  //       try {
+  //         await updateDoc(doc(db, 'orders', order.id), {
+  //           workerLiveLocation: {
+  //             lat: position.coords.latitude,
+  //             lng: position.coords.longitude,
+  //             updatedAt: new Date().toISOString(),
+  //             workerId: currentUserId,
+  //           }
+  //         });
+  //       } catch (error) {
+  //         console.error('Error updating live location:', error);
+  //       }
+  //     },
+  //     (error) => {
+  //       console.error('Geolocation error:', error);
+  //     },
+  //     {
+  //       enableHighAccuracy: true,
+  //       maximumAge: 5000,
+  //       timeout: 10000,
+  //     }
+  //   );
+
+  //   return () => {
+  //     navigator.geolocation.clearWatch(watchId);
+  //   };
+  // }, [role, currentUserId, order.id, order.assignedWorkers]);
 
   const statusLabels = {
-    'pending_negotiation': 'На согласовании',
-    'open': 'Открыт',
-    'in-progress': 'В работе',
-    'completed': 'Завершен'
+    'pending_negotiation': t.statusPending,
+    'open': t.statusOpen,
+    'in-progress': t.statusInProgress,
+    'completed': t.statusCompleted
+  };
+
+  const workerStatusLabels = {
+    assigned: t.workerAssigned,
+    'on-way': t.onWay,
+    'at-work': t.atWork,
+    finished: t.finished
   };
 
   const statusColors = {
@@ -3306,7 +3924,30 @@ const OrderDetails = ({
     'completed': 'bg-emerald-50 text-emerald-600'
   };
 
-  const hasExecutor = (order.status !== 'open' && order.status !== 'pending_negotiation') || order.assignedWorkers?.length! > 0;
+  // Show contact block only for customer and worker roles (not dispatcher — they have their own chat buttons)
+  const hasExecutor = role !== 'dispatcher' && (
+    (role === 'worker' && !!order.customerId) ||
+    (role === 'customer' && !!(order.workerId || order.assignedWorkers?.[0]?.id))
+  );
+
+  const hasWorkerOnWay = assignedWorkersList.some(w => w.status === 'on-way');
+  const hasWorkerAtWork = assignedWorkersList.some(w => w.status === 'at-work');
+
+  const liveWorkerLocation = order.workerLiveLocation
+    ? {
+        lat: order.workerLiveLocation.lat,
+        lng: order.workerLiveLocation.lng,
+      }
+    : null;
+
+  const allWorkersFinished =
+    assignedWorkersList.length > 0 &&
+    assignedWorkersList.every(w => w.status === 'finished');
+
+  const canCompleteOrder =
+    role === 'dispatcher' &&
+    order.status !== 'completed' &&
+    allWorkersFinished;
 
   return (
     <motion.div 
@@ -3315,36 +3956,38 @@ const OrderDetails = ({
       exit={{ opacity: 0, y: 50 }}
       className="absolute inset-0 bg-white z-[60] flex flex-col"
     >
-      <AnimatePresence>
+            <AnimatePresence>
         {viewingWorkerId && (
           <WorkerProfile 
             workerId={viewingWorkerId} 
             workers={workers}
             orders={orders}
+            role={role}
             onBack={() => setViewingWorkerId(null)} 
             onOrderClick={(order) => {
               onOrderClick(order);
               setViewingWorkerId(null);
             }}
-            onSelect={role === 'dispatcher' ? () => {
+            onSelect={role === 'dispatcher' && (assignedWorkerIds.has(viewingWorkerId) || hasFreeWorkerSlots) ? () => {
               onAssignWorker(order.id, viewingWorkerId);
               setViewingWorkerId(null);
             } : undefined}
           />
         )}
       </AnimatePresence>
-      <Header title="Детали заказа" showBack onBack={onBack} />
+      <Header title={t.orderDetails} showBack onBack={onBack} />
       <ReviewModal 
         isOpen={showReviewModal} 
         onClose={() => setShowReviewModal(false)} 
         onSubmit={handleReviewSubmit}
         targetName={targetName}
+        lang={lang}
       />
-      <div className="p-6 overflow-y-auto flex-1">
+      <div className="page-gutters py-6 overflow-y-auto flex-1">
         <div className="flex justify-between items-start mb-6">
           <div className="flex gap-2">
             <span className="px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-xs font-bold uppercase tracking-wider">
-              {order.category}
+              {getCategoryLabel(order.category, t)}
             </span>
             <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${statusColors[order.status]}`}>
               {statusLabels[order.status]}
@@ -3364,7 +4007,7 @@ const OrderDetails = ({
             <span className="text-2xl font-bold">{order.budget} ₽</span>
             {order.negotiatedBudget && (
               <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1">
-                Всего: {order.negotiatedBudget} ₽
+                {od.total}: {order.negotiatedBudget} ₽
               </span>
             )}
           </div>
@@ -3376,12 +4019,12 @@ const OrderDetails = ({
           <div className="bg-white border-2 border-amber-100 p-6 rounded-3xl mb-8 shadow-sm">
             <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
               <Sliders size={20} className="text-amber-500" />
-              Согласование бюджета
+              {od.budgetApproval}
             </h3>
             
             <div className="space-y-4">
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Итоговый бюджет (от клиента)</label>
+                <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">{od.finalBudget}</label>
                 <div className="relative">
                   <input 
                     type="number" 
@@ -3394,7 +4037,7 @@ const OrderDetails = ({
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Комиссия диспетчера</label>
+                <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">{od.dispatcherFee}</label>
                 <div className="relative">
                   <input 
                     type="number" 
@@ -3408,7 +4051,7 @@ const OrderDetails = ({
 
               <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100">
                 <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-blue-600">Выплата исполнителю:</span>
+                  <span className="text-sm font-medium text-blue-600">{od.workerPayout}</span>
                   <span className="text-xl font-black text-blue-700">{negotiatedBudget - commission} ₽</span>
                 </div>
               </div>
@@ -3417,7 +4060,7 @@ const OrderDetails = ({
                 onClick={() => onNegotiate(order.id, negotiatedBudget, commission)}
                 className="w-full bg-amber-500 text-white py-4 rounded-2xl font-bold text-lg shadow-lg active:scale-95 transition-transform"
               >
-                Согласовать и опубликовать
+                {od.approveAndPublish}
               </button>
             </div>
           </div>
@@ -3427,16 +4070,16 @@ const OrderDetails = ({
           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
             <div className="flex items-center gap-2 text-slate-400 mb-1">
               <MapPin size={14} />
-              <span className="text-[10px] font-bold uppercase tracking-wider">Адрес</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider">{t.address.replace(' *', '')}</span>
             </div>
             <div className="text-sm font-semibold">{order.address}</div>
           </div>
           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
             <div className="flex items-center gap-2 text-slate-400 mb-1">
               <Clock size={14} />
-              <span className="text-[10px] font-bold uppercase tracking-wider">Дата и Время</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider">{od.dateTime}</span>
             </div>
-            <div className="text-sm font-semibold">{order.date ? `${order.date} в ${order.time}` : (order.time || 'Не указано')}</div>
+            <div className="text-sm font-semibold">{order.date ? `${order.date} ${lang === 'en' ? 'at' : 'в'} ${order.time}` : (order.time || od.notSpecified)}</div>
           </div>
         </div>
 
@@ -3444,22 +4087,22 @@ const OrderDetails = ({
           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
             <div className="flex items-center gap-2 text-slate-400 mb-1">
               <Users size={14} />
-              <span className="text-[10px] font-bold uppercase tracking-wider">Грузчики</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider">{t.loaders}</span>
             </div>
-            <div className="text-sm font-semibold">{order.workersCount || 1} чел.</div>
+            <div className="text-sm font-semibold">{order.workersCount || 1} {od.peopleShort}</div>
           </div>
           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
             <div className="flex items-center gap-2 text-slate-400 mb-1">
               <CreditCard size={14} />
-              <span className="text-[10px] font-bold uppercase tracking-wider">Оплата</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider">{t.payment.replace(' (₽)', '')}</span>
             </div>
-            <div className="text-sm font-semibold">{order.paymentMethod || 'Наличные'}</div>
+            <div className="text-sm font-semibold">{getPaymentMethodLabel(order.paymentMethod || 'Наличные', t)}</div>
           </div>
         </div>
 
         {role === 'dispatcher' && order.status !== 'pending_negotiation' && (
           <div className="mb-8">
-            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Управление исполнителями</h3>
+            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">{od.manageWorkers}</h3>
             
             <div className="flex gap-2 mb-6">
               <button 
@@ -3467,7 +4110,7 @@ const OrderDetails = ({
                 className="flex-1 bg-white border border-slate-100 p-4 rounded-2xl shadow-sm flex items-center justify-center gap-2 text-slate-900 font-bold hover:bg-slate-50 transition-colors"
               >
                 <MessageSquare size={18} className="text-blue-600" />
-                Чат с клиентом
+                {od.chatWithCustomer}
               </button>
               {order.workerId && (
                 <button 
@@ -3475,7 +4118,7 @@ const OrderDetails = ({
                   className="flex-1 bg-white border border-slate-100 p-4 rounded-2xl shadow-sm flex items-center justify-center gap-2 text-slate-900 font-bold hover:bg-slate-50 transition-colors"
                 >
                   <MessageSquare size={18} className="text-emerald-600" />
-                  Чат с исполнителем
+                  {od.chatWithWorker}
                 </button>
               )}
             </div>
@@ -3492,8 +4135,8 @@ const OrderDetails = ({
                           worker.status === 'at-work' ? 'text-blue-600' : 
                           worker.status === 'on-way' ? 'text-amber-600' : 'text-slate-400'
                         }`}>
-                          {worker.status === 'at-work' ? 'На заказе' : 
-                           worker.status === 'on-way' ? 'В пути' : 'Назначен'}
+                          {worker.status === 'at-work' ? t.atWork : 
+                           worker.status === 'on-way' ? t.onWay : t.workerAssigned}
                         </p>
                       </div>
                     </div>
@@ -3509,21 +4152,21 @@ const OrderDetails = ({
             ) : (
               <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl p-8 text-center">
                 <Users size={32} className="mx-auto text-slate-300 mb-3" />
-                <p className="text-slate-500 text-sm mb-4">Исполнители еще не назначены</p>
+                <p className="text-slate-500 text-sm mb-4">{od.noWorkersAssigned}</p>
                 <button 
                   onClick={() => setIsAssigning(true)}
                   className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-bold text-sm shadow-lg shadow-blue-100"
                 >
-                  Назначить грузчиков
+                  {od.assignLoaders}
                 </button>
               </div>
             )}
 
             {order.candidates && order.candidates.length > 0 && (
               <div className="mt-6">
-                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Приняли заказ ({order.candidates.length})</h4>
+                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">{od.acceptedOrder} ({order.candidates.length})</h4>
                 <div className="flex gap-3 overflow-x-auto pb-2">
-                  {order.candidates.map(cid => {
+                  {order.candidates.filter(cid => !!cid).map(cid => {
                     const profile = workersMap[cid];
                     return (
                       <div 
@@ -3557,8 +4200,8 @@ const OrderDetails = ({
             >
               <div className="flex justify-between items-center mb-6">
                 <div>
-                  <h3 className="text-xl font-black text-slate-900">Выбор исполнителей</h3>
-                  <p className="text-xs text-slate-500">Выбрано: {selectedWorkers.length} из {order.workersCount || 1}</p>
+                  <h3 className="text-xl font-black text-slate-900">{od.chooseWorkers}</h3>
+                  <p className="text-xs text-slate-500">{od.selected}: {selectedWorkers.length} {lang === 'en' ? 'of' : 'из'} {maxAssignedWorkers}</p>
                 </div>
                 <button onClick={() => setIsAssigning(false)} className="p-2 bg-slate-100 rounded-full text-slate-400">
                   <X size={20} />
@@ -3567,18 +4210,21 @@ const OrderDetails = ({
               <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-2 mb-6">
                 {displayWorkers.map(worker => {
                   const isSelected = selectedWorkers.includes(worker.id);
+                  const canSelectMore = selectedWorkers.length < maxAssignedWorkers;
+                  const isSelectionDisabled = !isSelected && !canSelectMore;
                   return (
                     <button 
                       key={worker.id}
                       onClick={() => {
                         if (isSelected) {
                           setSelectedWorkers(prev => prev.filter(id => id !== worker.id));
-                        } else {
+                        } else if (canSelectMore) {
                           setSelectedWorkers(prev => [...prev, worker.id]);
                         }
                       }}
+                      disabled={isSelectionDisabled}
                       className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left ${
-                        isSelected ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-100'
+                        isSelected ? 'bg-blue-50 border-blue-200' : isSelectionDisabled ? 'bg-slate-50 border-slate-100 opacity-45' : 'bg-slate-50 border-slate-100'
                       }`}
                     >
                       <div className="flex items-center gap-3">
@@ -3589,7 +4235,7 @@ const OrderDetails = ({
                             <Star size={12} className="text-amber-400 fill-amber-400" />
                             <span className="font-bold">{worker.rating}</span>
                             <span className={worker.isOnline ? 'text-emerald-600' : 'text-slate-400'}>
-                              {worker.isOnline ? 'В сети' : 'Оффлайн'}
+                              {worker.isOnline ? od.online : od.offline}
                             </span>
                             {worker.availability && (
                               <span className="text-[10px] bg-slate-200 px-1.5 py-0.5 rounded text-slate-600 font-medium">
@@ -3611,20 +4257,20 @@ const OrderDetails = ({
               <button 
                 onClick={() => {
                   // Assign all selected workers at once
-                  onAssignWorker(order.id, selectedWorkers);
+                  onAssignWorker(order.id, selectedWorkers.slice(0, maxAssignedWorkers));
                   setIsAssigning(false);
                 }}
                 disabled={selectedWorkers.length === 0}
                 className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold text-lg shadow-lg disabled:opacity-50 active:scale-95 transition-all"
               >
-                Подтвердить выбор ({selectedWorkers.length})
+                {od.confirmSelection} ({selectedWorkers.length})
               </button>
             </motion.div>
           </div>
         )}
 
         <div className="bg-slate-50 p-4 rounded-2xl mb-8">
-          <p className="font-semibold mb-2 text-slate-900">Описание</p>
+          <p className="font-semibold mb-2 text-slate-900">{t.description}</p>
           <p className="text-slate-600 text-sm leading-relaxed">{order.description}</p>
         </div>
 
@@ -3632,7 +4278,7 @@ const OrderDetails = ({
         <div className="mb-8">
           <h3 className="font-bold text-lg mb-4 text-slate-900 flex items-center gap-2">
             <History size={20} className="text-blue-600" />
-            История изменений
+            {od.statusHistory}
           </h3>
           <div className="space-y-4 relative before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-100">
             {order.statusHistory && order.statusHistory.length > 0 ? (
@@ -3644,17 +4290,17 @@ const OrderDetails = ({
                   <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm">
                     <div className="flex justify-between items-start mb-1">
                       <span className="text-xs font-bold text-slate-900">
-                        {entry.workerName ? `Исполнитель ${entry.workerName}` : (entry.changedBy === 'customer' ? 'Заказчик' : entry.changedBy === 'dispatcher' ? 'Диспетчер' : 'Система')}
+                        {entry.workerName ? `${od.worker} ${entry.workerName}` : (entry.changedBy === 'customer' ? od.customer : entry.changedBy === 'dispatcher' ? od.dispatcher : od.system)}
                       </span>
                       <span className="text-[10px] text-slate-400 font-medium">
                         {new Date(entry.timestamp).toLocaleString('ru-RU', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
                       </span>
                     </div>
                     <p className="text-xs text-slate-600">
-                      Изменил статус на: <span className="font-bold text-blue-600">
-                        {entry.status === 'on-way' ? 'В пути' : 
-                         entry.status === 'at-work' ? 'На месте' : 
-                         entry.status === 'finished' ? 'Закончил' : 
+                      {od.changedStatusTo} <span className="font-bold text-blue-600">
+                        {entry.status === 'on-way' ? t.onWay : 
+                         entry.status === 'at-work' ? t.atWork : 
+                         entry.status === 'finished' ? t.finished : 
                          statusLabels[entry.status as keyof typeof statusLabels] || entry.status}
                       </span>
                     </p>
@@ -3662,7 +4308,7 @@ const OrderDetails = ({
                 </div>
               ))
             ) : (
-              <div className="pl-8 text-xs text-slate-400 italic">История изменений пуста</div>
+              <div className="pl-8 text-xs text-slate-400 italic">{od.emptyHistory}</div>
             )}
           </div>
         </div>
@@ -3672,7 +4318,7 @@ const OrderDetails = ({
           <div className="mb-8">
             <h3 className="font-bold text-lg mb-4 text-slate-900 flex items-center gap-2">
               <Users size={20} className="text-blue-600" />
-              Назначенные грузчики ({order.assignedWorkers.length})
+              {od.assignedLoaders} ({order.assignedWorkers.length})
             </h3>
             <div className="space-y-3">
               {order.assignedWorkers.map((worker) => (
@@ -3682,43 +4328,48 @@ const OrderDetails = ({
                       <img src={worker.avatar} alt={worker.name} className="w-10 h-10 rounded-full object-cover" />
                       <div>
                         <p className="font-bold text-slate-900">{worker.name}</p>
-                        <p className="text-xs text-slate-500">ID: {worker.id}</p>
+                        <p className="text-xs text-slate-500">
+                          {(() => {
+                            const rawPhone = workersMap?.[worker.id]?.phone || '';
+                            return rawPhone ? formatPhoneNumber(rawPhone) : od.phoneNotSpecified;
+                          })()}
+                        </p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
                       {worker.status === 'assigned' && (
-                        <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded-full text-[10px] font-bold uppercase tracking-wider">Назначен</span>
+                        <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded-full text-[10px] font-bold uppercase tracking-wider">{t.workerAssigned}</span>
                       )}
                       {worker.status === 'on-way' && (
                         <span className="px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
                           <div className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-pulse" />
-                          В пути
+                          {t.onWay}
                         </span>
                       )}
                       {worker.status === 'at-work' && (
                         <span className="px-3 py-1 bg-amber-50 text-amber-600 rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
                           <div className="w-1.5 h-1.5 bg-amber-600 rounded-full animate-pulse" />
-                          На месте
+                          {t.atWork}
                         </span>
                       )}
                       {worker.status === 'finished' && (
                         <span className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
                           <Check size={10} />
-                          Закончил
+                          {t.finished}
                         </span>
                       )}
                     </div>
                   </div>
 
                   {/* Worker Status Update Buttons */}
-                  {role === 'worker' && worker.id === currentUserId && (
+                  {(role === 'worker' && worker.id === currentUserId || role === 'dispatcher') && (
                     <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-50">
                       {worker.status === 'assigned' && (
                         <button 
                           onClick={() => onUpdateWorkerStatus(order.id, worker.id, 'on-way')}
                           className="bg-blue-600 text-white py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider shadow-sm"
                         >
-                          В путь
+                          {od.go}
                         </button>
                       )}
                       {worker.status === 'on-way' && (
@@ -3726,7 +4377,7 @@ const OrderDetails = ({
                           onClick={() => onUpdateWorkerStatus(order.id, worker.id, 'at-work')}
                           className="bg-amber-500 text-white py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider shadow-sm"
                         >
-                          На месте
+                          {od.arrived}
                         </button>
                       )}
                       {worker.status === 'at-work' && (
@@ -3734,7 +4385,7 @@ const OrderDetails = ({
                           onClick={() => onUpdateWorkerStatus(order.id, worker.id, 'finished')}
                           className="bg-emerald-600 text-white py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider shadow-sm"
                         >
-                          Закончил
+                          {od.finish}
                         </button>
                       )}
                     </div>
@@ -3760,15 +4411,15 @@ const OrderDetails = ({
               />
               <Marker position={[order.lat, order.lng]}>
                 <Popup>
-                  <div className="text-xs font-bold">{order.address}</div>
+                    <div className="text-xs font-bold">{order.address}</div>
                 </Popup>
               </Marker>
 
               {/* Worker Tracking Marker */}
-              {order.status === 'in-progress' && workerLocation && (
-                <Marker position={[workerLocation.lat, workerLocation.lng]} icon={workerIcon}>
+              {hasWorkerOnWay && liveWorkerLocation && (
+                <Marker position={[liveWorkerLocation.lat, liveWorkerLocation.lng]} icon={workerIcon}>
                   <Popup>
-                    <div className="text-xs font-bold">Исполнитель в пути</div>
+                    <div className="text-xs font-bold">{od.workerOnWay}</div>
                   </Popup>
                 </Marker>
               )}
@@ -3777,13 +4428,13 @@ const OrderDetails = ({
             <div className="h-full w-full bg-slate-100 flex items-center justify-center text-slate-400">
               <div className="text-center">
                 <MapPin size={32} className="mx-auto mb-2 opacity-20" />
-                <p className="text-xs font-medium">Карта недоступна</p>
+                <p className="text-xs font-medium">{od.mapUnavailable}</p>
               </div>
             </div>
           )}
         </div>
 
-        {order.status === 'in-progress' && workerLocation && (
+        {false && hasWorkerOnWay && liveWorkerLocation && (
           <motion.div 
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -3795,12 +4446,51 @@ const OrderDetails = ({
               </div>
               <div>
                 <p className="text-xs font-black text-blue-600 uppercase tracking-tighter">Live Tracking</p>
-                <p className="text-sm font-bold text-blue-900">Исполнитель в пути к вам</p>
+                <p className="text-sm font-bold text-blue-900">{od.workerIsComing}</p>
               </div>
             </div>
             <div className="text-right">
-              <p className="text-[10px] font-bold text-blue-400 uppercase">Прибытие через</p>
-              <p className="text-lg font-black text-blue-700">~8 мин</p>
+              <p className="text-[10px] font-bold text-blue-400 uppercase">{od.arrivalIn}</p>
+              <p className="text-lg font-black text-blue-700">
+                {(() => {
+                  if (!order.lat || !order.lng || !liveWorkerLocation?.lat || !liveWorkerLocation?.lng) {
+                    return '...';
+                  }
+                  // Haversine distance в км
+                  const R = 6371;
+                  const dLat = (order.lat - liveWorkerLocation.lat) * Math.PI / 180;
+                  const dLon = (order.lng - liveWorkerLocation.lng) * Math.PI / 180;
+                  const a =
+                    Math.sin(dLat / 2) ** 2 +
+                    Math.cos(liveWorkerLocation.lat * Math.PI / 180) *
+                    Math.cos(order.lat * Math.PI / 180) *
+                    Math.sin(dLon / 2) ** 2;
+                  const distKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                  // Средняя скорость по городу 30 км/ч
+                  const mins = Math.round((distKm / 30) * 60);
+                  if (mins < 1) return od.lessThanMinute;
+                  if (mins > 120) return `~${Math.round(mins / 60)} ${od.hourShort}`;
+                  return `~${mins} ${od.minuteShort}`;
+                })()}
+              </p>
+            </div>
+          </motion.div>
+        )}
+
+        {hasWorkerAtWork && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-8 p-4 bg-amber-50 border border-amber-100 rounded-2xl flex items-center justify-between"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center text-white shadow-lg shadow-amber-200">
+                <Check size={18} />
+              </div>
+              <div>
+                <p className="text-xs font-black text-amber-600 uppercase tracking-tighter">{od.workerAtPlaceTitle}</p>
+                <p className="text-sm font-bold text-amber-900">{od.workerAtPlaceText}</p>
+              </div>
             </div>
           </motion.div>
         )}
@@ -3815,15 +4505,22 @@ const OrderDetails = ({
               <div className="flex items-center gap-2 text-emerald-600">
                 <Phone size={16} />
                 <span className="text-xs font-bold uppercase tracking-wider">
-                  {role === 'worker' ? 'Контакт заказчика' : 'Контакт исполнителя'}
+                  {role === 'worker' ? od.customerContact : od.workerContact}
                 </span>
               </div>
               {role === 'customer' && (
                 <button 
-                  onClick={() => setViewingWorkerId(order.workerId || String(selectedWorker) || 'u2')}
+                  onClick={() => {
+                    if (role === 'customer') {
+                      const wId = order.workerId || order.assignedWorkers?.[0]?.id || String(selectedWorker || '');
+                      if (wId) {
+                        setViewingWorkerId(wId);
+                      }
+                    }
+                  }}
                   className="text-xs font-bold text-emerald-600 underline underline-offset-2"
                 >
-                  Профиль
+                  {od.profile}
                 </button>
               )}
             </div>
@@ -3833,73 +4530,113 @@ const OrderDetails = ({
                 className={role === 'customer' ? "cursor-pointer" : ""}
                 onClick={() => {
                   if (role === 'customer') {
-                    setViewingWorkerId(order.workerId || String(selectedWorker) || 'u2');
+                    const wId = order.workerId || order.assignedWorkers?.[0]?.id || String(selectedWorker || '');
+                    if (wId) {
+                      setViewingWorkerId(wId);
+                    }
                   }
                 }}
               >
                 <div className="text-lg font-bold text-emerald-900">
-                  {role === 'worker' ? '+7 (999) 123-45-67' : '+7 (900) 555-01-23'}
+                  {contactPhoneFormatted}
                 </div>
+
                 {role === 'customer' && (
-                  <div className="text-sm font-medium text-emerald-700 mt-1 flex items-center gap-1">
-                    {workersMap[order.workerId || String(selectedWorker) || 'u2']?.name || 'Иван Петров'}
+                  <div
+                    className="text-sm font-medium text-emerald-700 mt-1 flex items-center gap-1 cursor-pointer"
+                    onClick={() => {
+                      if (assignedWorkerId) {
+                        setViewingWorkerId(assignedWorkerId);
+                      }
+                    }}
+                  >
+                    {contactName}
                     <ChevronRight size={14} />
                   </div>
                 )}
               </div>
               {role === 'customer' && (
                 <img 
-                  src={workersMap[order.workerId || String(selectedWorker) || 'u2']?.avatar || 'https://picsum.photos/seed/worker1/200'} 
+                  src={(() => {
+                    const wId = order.workerId || order.assignedWorkers?.[0]?.id || String(selectedWorker || '');
+                    const worker = workersMap?.[wId];
+
+                    return (
+                      worker?.avatar ||
+                      worker?.photoURL ||
+                      worker?.photoUrl ||
+                      worker?.image ||
+                      'https://api.dicebear.com/7.x/avataaars/svg?seed=' + wId
+                    );
+                  })()}
                   className="w-12 h-12 rounded-full border-2 border-white shadow-sm cursor-pointer"
-                  onClick={() => setViewingWorkerId(order.workerId || String(selectedWorker) || 'u2')}
+                  onClick={() => {
+                    const wId = order.workerId || order.assignedWorkers?.[0]?.id || String(selectedWorker || '');
+                    setViewingWorkerId(wId);
+                  }}
                 />
               )}
             </div>
 
             <div className="flex gap-2 mt-4">
-              <a href={`tel:${role === 'worker' ? '+79991234567' : '+79005550123'}`} className="flex-1 bg-emerald-600 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2">
+              <a
+                href={`tel:${contactPhoneHref}`}
+                className="flex-1 bg-emerald-600 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2"
+              >
                 <Phone size={16} />
-                Позвонить
+                {od.call}
               </a>
-              <button 
-                onClick={() => onOpenChat(order.id, order.workerId || order.assignedWorkers?.[0]?.id || 'u2')}
-                className="flex-1 bg-white text-emerald-600 border border-emerald-200 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2"
+
+              <button
+                onClick={() => {
+                  if (!contactId) return;
+                  onOpenChat(contactId, contactRole, order.id);
+                }}
+                disabled={!contactId}
+                className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 border ${
+                  contactId
+                    ? 'bg-white text-emerald-600 border-emerald-200'
+                    : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                }`}
               >
                 <MessageSquare size={16} />
-                Чат
-              </button>
-              <button 
-                onClick={onShowSupport}
-                className="flex-1 bg-slate-900 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2"
-              >
-                <Shield size={16} />
-                Поддержка
+                {t.chat}
               </button>
             </div>
-            
-            <p className="text-[10px] text-emerald-600 mt-2 uppercase font-medium">Свяжитесь для уточнения деталей</p>
+
+            {role !== 'dispatcher' && (
+              <button 
+                onClick={onShowSupport}
+                className="w-full mt-2 bg-slate-900 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2"
+              >
+                <Shield size={16} />
+                {t.support}
+              </button>
+            )}
+
+            <p className="text-[10px] text-emerald-600 mt-2 uppercase font-medium">{od.contactHint}</p>
           </motion.div>
         )}
 
-        {order.statusHistory && order.statusHistory.length > 0 && (
+        {role === 'dispatcher' && order.statusHistory && order.statusHistory.length > 0 && (
           <div className="mb-8">
             <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
               <History size={20} className="text-slate-400" />
-              История изменений
+              {od.statusHistory}
             </h3>
             <div className="space-y-4 relative before:absolute before:left-[19px] before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-100">
               {order.statusHistory.map((entry, i) => {
                 const statusLabels: Record<string, string> = {
-                  'pending_negotiation': 'Ожидание согласования',
-                  'open': 'Открыт',
-                  'in-progress': 'В работе',
-                  'completed': 'Завершен'
+                  'pending_negotiation': t.statusPending,
+                  'open': t.statusOpen,
+                  'in-progress': t.statusInProgress,
+                  'completed': t.statusCompleted
                 };
                 const roleLabels: Record<string, string> = {
-                  'customer': 'Заказчик',
-                  'worker': 'Исполнитель',
-                  'dispatcher': 'Диспетчер',
-                  'system': 'Система'
+                  'customer': od.customer,
+                  'worker': od.worker,
+                  'dispatcher': od.dispatcher,
+                  'system': od.system
                 };
                 return (
                   <div key={i} className="relative pl-10">
@@ -3920,7 +4657,7 @@ const OrderDetails = ({
                         </p>
                       </div>
                       <p className="text-xs text-slate-500">
-                        Изменил: <span className="font-bold text-slate-700">{roleLabels[entry.changedBy] || entry.changedBy}</span>
+                        {od.changedBy} <span className="font-bold text-slate-700">{roleLabels[entry.changedBy] || entry.changedBy}</span>
                         {entry.workerName && <span className="text-slate-400"> ({entry.workerName})</span>}
                       </p>
                       <p className="text-[10px] text-slate-400 mt-1">
@@ -3946,20 +4683,20 @@ const OrderDetails = ({
                     : 'bg-blue-600 text-white'
                 }`}
               >
-                {order.candidates?.includes(currentUserId) ? 'Вы откликнулись' : 'Откликнуться на заказ'}
+                {order.candidates?.includes(currentUserId) ? od.applied : od.apply}
               </button>
             )}
-            {order.status === 'in-progress' && (
-              <button 
-                onClick={() => onUpdateStatus(order.id, 'completed')}
-                className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold text-lg shadow-lg active:scale-95 transition-transform"
+            {canCompleteOrder && (
+              <button
+                onClick={() => onCompleteOrder?.(order.id)}
+                className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold shadow-sm"
               >
-                Завершить заказ
+                {od.completeOrder}
               </button>
             )}
             {order.status === 'completed' && (
               <div className="text-center p-4 bg-emerald-50 text-emerald-600 rounded-2xl font-bold">
-                Заказ успешно выполнен!
+                {od.orderCompleted}
               </div>
             )}
           </div>
@@ -3971,13 +4708,13 @@ const OrderDetails = ({
                   onClick={() => onDeleteOrder?.(order.id)}
                   className="w-full bg-red-50 text-red-600 py-4 rounded-2xl font-bold text-lg border border-red-100 active:scale-95 transition-transform flex items-center justify-center gap-2"
                 >
-                  <Trash2 size={20} /> Удалить заказ
+                  <Trash2 size={20} /> {od.deleteOrder}
                 </button>
               </div>
             )}
             {order.assignedWorkers && order.assignedWorkers.length > 0 && (
               <div className="mb-8">
-                <h3 className="font-bold text-lg mb-4">Назначенные исполнители</h3>
+                <h3 className="font-bold text-lg mb-4">{od.assignedExecutors}</h3>
                 <div className="space-y-3">
                   {order.assignedWorkers.map(worker => (
                     <div key={worker.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
@@ -3985,14 +4722,21 @@ const OrderDetails = ({
                         <img src={worker.avatar} className="w-10 h-10 rounded-full object-cover" />
                         <div>
                           <p className="font-bold text-sm">{worker.name}</p>
-                          <p className="text-[10px] text-slate-400 uppercase font-bold">{worker.status}</p>
+                          <p className="text-[10px] text-slate-400 font-bold">
+                            {{
+                              assigned: t.workerAssigned,
+                              'on-way': t.onWay,
+                              'at-work': t.atWork,
+                              finished: t.finished,
+                            }[worker.status] || t.notSpecified}
+                          </p>
                         </div>
                       </div>
-                      {order.status === 'in-progress' && (
+                      {order.status !== 'completed' && (
                         <button 
                           onClick={() => onUnassignWorker?.(order.id, worker.id)}
                           className="p-2 text-red-500 hover:bg-red-50 rounded-xl transition-colors"
-                          title="Отстранить"
+                          title={od.remove}
                         >
                           <UserMinus size={18} />
                         </button>
@@ -4002,12 +4746,14 @@ const OrderDetails = ({
                 </div>
               </div>
             )}
-            {order.status === 'open' && (!order.assignedWorkers || order.assignedWorkers.length === 0) && (
+            {(order.status === 'open' || order.status === 'in-progress') && hasFreeWorkerSlots && (
               <>
-                <h3 className="font-bold text-lg mb-4">Отклики ({order.candidates?.length || 0})</h3>
-                {order.candidates && order.candidates.length > 0 ? (
-                  order.candidates.map(workerId => {
-                    const profile = MOCK_WORKER_PROFILES[workerId];
+                <h3 className="font-bold text-lg mb-4">
+                  {od.candidates} ({availableCandidateIds.length}) · {od.free} {maxAssignedWorkers - assignedSlotsCount}
+                </h3>
+                {availableCandidateIds.length > 0 ? (
+                  availableCandidateIds.map(workerId => {
+                    const profile = workers.find(w => w.id === workerId || w.uid === workerId);
                     return (
                       <div key={workerId} className="flex items-center justify-between p-4 border border-slate-100 rounded-2xl mb-3">
                         <button 
@@ -4016,10 +4762,10 @@ const OrderDetails = ({
                         >
                           <img src={profile?.avatar || `https://picsum.photos/seed/${workerId}/50`} className="w-12 h-12 rounded-xl object-cover" />
                           <div>
-                            <p className="font-bold">{profile?.name || 'Исполнитель'}</p>
+                            <p className="font-bold">{profile?.name || od.worker}</p>
                             <div className="flex items-center gap-1 text-xs text-amber-500">
                               <Star size={12} fill="currentColor" />
-                              <span>{profile?.rating || '4.5'} ({profile?.reviews || '0'} отзывов)</span>
+                              <span>{profile?.rating || '4.5'} ({getReviewsCount(profile)} {t.reviews.toLowerCase()})</span>
                             </div>
                           </div>
                         </button>
@@ -4029,7 +4775,7 @@ const OrderDetails = ({
                           }}
                           className="text-xs font-bold text-blue-600 uppercase tracking-wider"
                         >
-                          Выбрать
+                          {od.choose}
                         </button>
                       </div>
                     );
@@ -4037,14 +4783,14 @@ const OrderDetails = ({
                 ) : (
                   <div className="text-center py-8 text-slate-400">
                     <Users size={48} className="mx-auto mb-3 opacity-20" />
-                    <p>Пока нет откликов</p>
+                    <p>{od.noCandidates}</p>
                   </div>
                 )}
               </>
             )}
-            {order.assignedWorkers && order.assignedWorkers.length > 0 && order.status === 'open' && (
+            {order.assignedWorkers && order.assignedWorkers.length > 0 && (order.status === 'open' || order.status === 'in-progress') && !hasFreeWorkerSlots && (
               <div className="text-center p-4 bg-blue-50 text-blue-600 rounded-2xl font-bold">
-                Исполнитель выбран! Ожидайте подтверждения.
+                {od.allSelected}
               </div>
             )}
           </div>
@@ -4056,11 +4802,13 @@ const OrderDetails = ({
 
 interface CreateOrderProps {
   onClose: () => void;
-  onCreate: (order: Partial<Order>) => void;
+  onCreate: (order: Partial<Order>) => Promise<boolean | string> | boolean | string | void;
   initialCategory?: string;
+  lang: AppLang;
 }
 
-const OrderHistory = ({ user, orders, onOrderClick, onWorkerClick, onBack, onShowSupport }: { user: User, orders: Order[], onOrderClick: (order: Order) => void, onWorkerClick: (workerId: string) => void, onBack: () => void, onShowSupport: () => void }) => {
+const OrderHistory = ({ user, orders, lang, onOrderClick, onWorkerClick, onBack, onShowSupport }: { user: User, orders: Order[], lang: AppLang, onOrderClick: (order: Order) => void, onWorkerClick: (workerId: string) => void, onBack: () => void, onShowSupport: () => void }) => {
+  const t = TRANSLATIONS[lang];
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'in-progress' | 'completed'>('all');
   const [dateFilter, setDateFilter] = useState<string>('');
   const [sortBy, setSortBy] = useState<'date' | 'budget' | 'status'>('date');
@@ -4108,23 +4856,23 @@ const OrderHistory = ({ user, orders, onOrderClick, onWorkerClick, onBack, onSho
       exit={{ x: '100%' }}
       className="absolute inset-0 bg-white z-50 flex flex-col"
     >
-      <Header title="История заказов" showBack onBack={onBack} />
+      <Header title={t.orderHistory} showBack onBack={onBack} />
       
       <div className="bg-white border-b border-slate-100 p-4 space-y-4">
         {/* Status Filter */}
         <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
           {[
-            { id: 'all', label: 'Все' },
-            { id: 'open', label: 'Открытые' },
-            { id: 'in-progress', label: 'В работе' },
-            { id: 'completed', label: 'Завершенные' }
+            { id: 'all', label: t.all },
+            { id: 'open', label: t.open },
+            { id: 'in-progress', label: t.inProgress },
+            { id: 'completed', label: t.completed }
           ].map(filter => (
             <button
               key={filter.id}
               onClick={() => setStatusFilter(filter.id as any)}
               className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all ${
                 statusFilter === filter.id 
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' 
+                  ? 'bg-blue-600 text-white shadow-sm' 
                   : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
               }`}
             >
@@ -4135,16 +4883,15 @@ const OrderHistory = ({ user, orders, onOrderClick, onWorkerClick, onBack, onSho
 
         <div className="flex gap-3">
           {/* Date Filter */}
-          <div className="flex-1 flex items-center gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-100">
-            <Clock size={18} className="text-slate-400" />
-            <input 
-              type="date" 
+          <div className="flex-1 min-w-0 relative">
+            <DateField
               value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value)}
-              className="bg-transparent text-sm font-bold text-slate-900 focus:outline-none w-full"
+              onChange={setDateFilter}
+              placeholder="30.04.2026"
+              className="text-sm font-bold text-slate-900 pr-10"
             />
             {dateFilter && (
-              <button onClick={() => setDateFilter('')} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => setDateFilter('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
                 <X size={16} />
               </button>
             )}
@@ -4158,9 +4905,9 @@ const OrderHistory = ({ user, orders, onOrderClick, onWorkerClick, onBack, onSho
               onChange={(e) => setSortBy(e.target.value as any)}
               className="bg-transparent text-sm font-bold text-slate-900 focus:outline-none"
             >
-              <option value="date">По дате</option>
-              <option value="budget">По бюджету</option>
-              <option value="status">По статусу</option>
+              <option value="date">{lang === 'en' ? 'By date' : 'По дате'}</option>
+              <option value="budget">{lang === 'en' ? 'By budget' : 'По бюджету'}</option>
+              <option value="status">{lang === 'en' ? 'By status' : 'По статусу'}</option>
             </select>
             <button 
               onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
@@ -4172,48 +4919,52 @@ const OrderHistory = ({ user, orders, onOrderClick, onWorkerClick, onBack, onSho
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+      <div className="flex-1 overflow-y-auto page-gutters py-6 space-y-4">
         {historyOrders.length > 0 ? (
           historyOrders.map(order => (
             <div key={order.id} className="relative">
-              <OrderCard order={order} onClick={onOrderClick} onWorkerClick={onWorkerClick} />
+              <OrderCard order={order} onClick={onOrderClick} onWorkerClick={onWorkerClick} lang={lang} />
             </div>
           ))
         ) : (
           <div className="text-center py-20 text-slate-400">
             <History size={48} className="mx-auto mb-4 opacity-20" />
-            <p className="font-medium">Заказов не найдено</p>
+            <p className="font-medium">{t.noOrders}</p>
             {(statusFilter !== 'all' || dateFilter) && (
               <button 
                 onClick={() => { setStatusFilter('all'); setDateFilter(''); }}
                 className="mt-4 text-blue-600 font-bold text-sm"
               >
-                Сбросить фильтры
+                {t.resetFilters}
               </button>
             )}
           </div>
         )}
       </div>
 
-      <div className="p-6 border-t border-slate-100">
-        <button 
-          onClick={onShowSupport}
-          className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 active:scale-95 transition-transform"
-        >
-          <MessageSquare size={20} />
-          Написать в поддержку
-        </button>
-      </div>
+      {user.role !== 'dispatcher' && (
+        <div className="page-gutters py-6 border-t border-slate-100">
+          <button 
+            onClick={onShowSupport}
+            className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 active:scale-95 transition-transform"
+          >
+            <MessageSquare size={20} />
+            {t.writeSupport}
+          </button>
+        </div>
+      )}
     </motion.div>
   );
 };
 
-const CreateOrder = ({ onClose, onCreate, initialCategory = 'Грузчики' }: CreateOrderProps) => {
+const CreateOrder = ({ onClose, onCreate, initialCategory = 'Грузчики', lang }: CreateOrderProps) => {
+  const t = TRANSLATIONS[lang];
+  const safeInitialCategory = typeof initialCategory === 'string' ? initialCategory : 'Грузчики';
   const [formData, setFormData] = useState({
     title: '',
     description: '',
     budget: '',
-    category: initialCategory,
+    category: safeInitialCategory,
     address: '',
     time: '',
     date: '',
@@ -4223,6 +4974,83 @@ const CreateOrder = ({ onClose, onCreate, initialCategory = 'Грузчики' }
     lng: 37.6173
   });
   const [error, setError] = useState<string | null>(null);
+  const [addressSuggestions, setAddressSuggestions] = useState<{ display_name: string; lat: string; lon: string }[]>([]);
+  const [isAddressFocused, setIsAddressFocused] = useState(false);
+  const [isAddressLoading, setIsAddressLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedAddressLabel, setSelectedAddressLabel] = useState('');
+  const formScrollRef = useRef<HTMLDivElement>(null);
+  const titleFieldRef = useRef<HTMLDivElement>(null);
+  const workersFieldRef = useRef<HTMLDivElement>(null);
+  const addressFieldRef = useRef<HTMLDivElement>(null);
+  const budgetFieldRef = useRef<HTMLDivElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const workersInputRef = useRef<HTMLInputElement>(null);
+  const addressInputRef = useRef<HTMLInputElement>(null);
+  const budgetInputRef = useRef<HTMLInputElement>(null);
+
+  const scrollToField = (field: 'title' | 'workers' | 'address' | 'budget') => {
+    const fieldRefs = {
+      title: titleFieldRef,
+      workers: workersFieldRef,
+      address: addressFieldRef,
+      budget: budgetFieldRef,
+    };
+    const inputRefs = {
+      title: titleInputRef,
+      workers: workersInputRef,
+      address: addressInputRef,
+      budget: budgetInputRef,
+    };
+    const container = formScrollRef.current;
+    const target = fieldRefs[field].current;
+    if (!container || !target) return;
+
+    const offset = target.offsetTop - 16;
+    container.scrollTo({ top: Math.max(0, offset), behavior: 'smooth' });
+    window.setTimeout(() => inputRefs[field].current?.focus(), 350);
+  };
+
+  useEffect(() => {
+    const query = formData.address.trim();
+    if (!isAddressFocused || query.length < 3 || query === selectedAddressLabel) {
+      setAddressSuggestions([]);
+      setIsAddressLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setIsAddressLoading(true);
+      try {
+        const params = new URLSearchParams({
+          format: 'jsonv2',
+          addressdetails: '1',
+          limit: '5',
+          countrycodes: 'ru',
+          q: query,
+        });
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error('Address lookup failed');
+        const data = await response.json();
+        setAddressSuggestions(Array.isArray(data) ? data : []);
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          console.error('Address lookup error:', err);
+          setAddressSuggestions([]);
+        }
+      } finally {
+        if (!controller.signal.aborted) setIsAddressLoading(false);
+      }
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [formData.address, isAddressFocused, selectedAddressLabel]);
 
   const handleLocationSelect = async (lat: number, lng: number) => {
     setFormData(prev => ({ ...prev, lat, lng }));
@@ -4231,11 +5059,31 @@ const CreateOrder = ({ onClose, onCreate, initialCategory = 'Грузчики' }
       const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`);
       const data = await response.json();
       if (data.display_name) {
+        setSelectedAddressLabel(data.display_name);
+        setAddressSuggestions([]);
         setFormData(prev => ({ ...prev, address: data.display_name }));
       }
     } catch (e) {
-      setFormData(prev => ({ ...prev, address: `${lat.toFixed(4)}, ${lng.toFixed(4)}` }));
+      const fallbackAddress = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+      setSelectedAddressLabel(fallbackAddress);
+      setAddressSuggestions([]);
+      setFormData(prev => ({ ...prev, address: fallbackAddress }));
     }
+  };
+
+  const handleAddressSuggestionSelect = (suggestion: { display_name: string; lat: string; lon: string }) => {
+    const lat = Number(suggestion.lat);
+    const lng = Number(suggestion.lon);
+    setSelectedAddressLabel(suggestion.display_name);
+    setAddressSuggestions([]);
+    setIsAddressFocused(false);
+    setError(null);
+    setFormData(prev => ({
+      ...prev,
+      address: suggestion.display_name,
+      lat: Number.isFinite(lat) ? lat : prev.lat,
+      lng: Number.isFinite(lng) ? lng : prev.lng,
+    }));
   };
 
   const MapEvents = () => {
@@ -4247,48 +5095,76 @@ const CreateOrder = ({ onClose, onCreate, initialCategory = 'Грузчики' }
     return null;
   };
 
-  const handleSubmit = () => {
-    let hasError = false;
+  const isFieldError = error && (
+    error === t.writeTitleError ||
+    error === t.shortTitleError ||
+    error === t.addressError ||
+    error === t.budgetError ||
+    error === t.workersError
+  );
+
+  const handleSubmit = async () => {
+    if (isSubmitting) return;
+
     if (!formData.title.trim()) {
-      setError('Пожалуйста, введите название заказа');
-      hasError = true;
-    } else if (formData.title.length < 5) {
-      setError('Название слишком короткое (минимум 5 символов)');
-      hasError = true;
+      setError(t.writeTitleError);
+      scrollToField('title');
+      return;
     }
-    
+
+    if (formData.title.trim().length < 5) {
+      setError(t.shortTitleError);
+      scrollToField('title');
+      return;
+    }
+
     if (!formData.address.trim()) {
-      setError('Пожалуйста, укажите адрес выполнения');
-      hasError = true;
+      setError(t.addressError);
+      scrollToField('address');
+      return;
     }
 
     if (formData.budget && Number(formData.budget) <= 0) {
-      setError('Бюджет должен быть положительным числом');
-      hasError = true;
+      setError(t.budgetError);
+      scrollToField('budget');
+      return;
     }
 
     if (formData.workersCount < 1) {
-      setError('Минимум 1 грузчик');
-      hasError = true;
+      setError(t.workersError);
+      scrollToField('workers');
+      return;
     }
     
-    if (hasError) return;
-    
     setError(null);
-    onCreate({
-      title: formData.title,
-      description: formData.description,
-      budget: Number(formData.budget),
-      category: formData.category,
-      address: formData.address,
-      time: formData.time,
-      date: formData.date,
-      workersCount: formData.workersCount,
-      paymentMethod: formData.paymentMethod,
-      status: 'pending_negotiation',
-      lat: formData.lat,
-      lng: formData.lng
-    });
+    setIsSubmitting(true);
+    try {
+      const result = await Promise.resolve(onCreate({
+        title: formData.title.trim(),
+        description: formData.description.trim(),
+        budget: Number(formData.budget) || 0,
+        category: formData.category,
+        address: formData.address.trim(),
+        time: formData.time,
+        date: formData.date,
+        workersCount: formData.workersCount,
+        paymentMethod: formData.paymentMethod,
+        status: 'open',
+        lat: formData.lat,
+        lng: formData.lng
+      }));
+
+      if (typeof result === 'string') {
+        setError(result);
+      } else if (result === false) {
+        setError(t.createOrderError);
+      }
+    } catch (err) {
+      console.error('Create order submit error:', err);
+      setError(t.createOrderError);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -4298,75 +5174,118 @@ const CreateOrder = ({ onClose, onCreate, initialCategory = 'Грузчики' }
       exit={{ opacity: 0, scale: 0.95 }}
       className="absolute inset-0 bg-white z-40 flex flex-col"
     >
-      <Header title="Новый заказ" showBack onBack={onClose} />
-      <div className="p-6 space-y-6 overflow-y-auto flex-1">
+      <Header title={t.newOrder} showBack onBack={onClose} />
+      <div ref={formScrollRef} className="page-gutters py-6 space-y-6 overflow-y-auto flex-1">
         
-        <div>
-          <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Что нужно сделать? *</label>
+        <div ref={titleFieldRef}>
+          <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">{t.whatToDo}</label>
           <input 
+            ref={titleInputRef}
             type="text" 
             value={formData.title}
             onChange={(e) => { setFormData({ ...formData, title: e.target.value }); setError(null); }}
-            placeholder="Например: Перевезти диван" 
-            className={`w-full p-4 bg-slate-50 border ${error && !formData.title ? 'border-red-200 ring-2 ring-red-500/10' : 'border-slate-100'} rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all`}
+            placeholder={t.titleExample}
+            className={`w-full p-4 bg-slate-50 border ${error && (error === t.writeTitleError || error === t.shortTitleError) ? 'border-red-200 ring-2 ring-red-500/10' : 'border-slate-100'} rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all`}
           />
-          {error && !formData.title && (
+          {error && (error === t.writeTitleError || error === t.shortTitleError) && (
             <motion.div 
               initial={{ opacity: 0, y: -5 }}
               animate={{ opacity: 1, y: 0 }}
               className="mt-2 bg-red-50 text-red-600 p-3 rounded-xl text-[11px] font-bold border border-red-100 flex items-center gap-2"
             >
               <div className="w-1.5 h-1.5 bg-red-600 rounded-full animate-pulse" />
-              Пожалуйста, введите название заказа
+              {error}
             </motion.div>
           )}
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Категория</label>
+            <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">{t.category}</label>
             <select 
               value={formData.category}
               onChange={(e) => setFormData({ ...formData, category: e.target.value })}
               className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none appearance-none"
             >
-              <option>Грузчики</option>
-              <option>Переезд</option>
-              <option>Сборка</option>
-              <option>Разное</option>
+              <option value="Грузчики">{t.loaders}</option>
+              <option value="Переезд">{t.moving}</option>
+              <option value="Сборка">{t.assembly}</option>
+              <option value="Разное">{t.other}</option>
             </select>
           </div>
-          <div>
-            <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Грузчики</label>
+          <div ref={workersFieldRef}>
+            <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">{t.loaders}</label>
             <input 
+              ref={workersInputRef}
               type="number" 
               value={formData.workersCount}
-              onChange={(e) => setFormData({ ...formData, workersCount: Number(e.target.value) })}
+              onChange={(e) => { setFormData({ ...formData, workersCount: Number(e.target.value) }); setError(null); }}
               min="1"
-              className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+              className={`w-full p-4 bg-slate-50 border ${error === t.workersError ? 'border-red-200 ring-2 ring-red-500/10' : 'border-slate-100'} rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all`}
             />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Адрес *</label>
-          <div className="relative mb-4">
-            <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <input 
-              type="text" 
-              value={formData.address}
-              onChange={(e) => { setFormData({ ...formData, address: e.target.value }); setError(null); }}
-              placeholder="Улица, дом, квартира" 
-              className={`w-full p-4 pl-12 bg-slate-50 border ${error && !formData.address ? 'border-red-200 ring-2 ring-red-500/10' : 'border-slate-100'} rounded-2xl focus:ring-2 focus:ring-blue-500 focus:scale-[1.02] outline-none transition-all`}
-            />
-            {error && !formData.address && (
+            {error === t.workersError && (
               <motion.div 
                 initial={{ opacity: 0, y: -5 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="mt-2 bg-red-50 text-red-600 p-3 rounded-xl text-[11px] font-bold border border-red-100 flex items-center gap-2"
               >
                 <div className="w-1.5 h-1.5 bg-red-600 rounded-full animate-pulse" />
-                Пожалуйста, укажите адрес выполнения
+                {error}
+              </motion.div>
+            )}
+          </div>
+        </div>
+
+        <div ref={addressFieldRef}>
+          <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">{t.address}</label>
+          <div className="relative mb-4 z-[1200]">
+            <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            <input 
+              ref={addressInputRef}
+              type="text" 
+              value={formData.address}
+              onChange={(e) => {
+                setSelectedAddressLabel('');
+                setFormData({ ...formData, address: e.target.value });
+                setError(null);
+              }}
+              onFocus={() => setIsAddressFocused(true)}
+              onBlur={() => window.setTimeout(() => setIsAddressFocused(false), 150)}
+              placeholder={t.addressPlaceholder}
+              className={`w-full p-4 pl-12 bg-slate-50 border ${error === t.addressError ? 'border-red-200 ring-2 ring-red-500/10' : 'border-slate-100'} rounded-2xl focus:ring-2 focus:ring-blue-500 focus:scale-[1.02] outline-none transition-all`}
+            />
+            {isAddressFocused && (isAddressLoading || addressSuggestions.length > 0) && (
+              <div className="absolute left-0 right-0 top-[calc(100%+8px)] bg-white border border-slate-100 rounded-2xl shadow-xl overflow-hidden z-[1300]">
+                {isAddressLoading && (
+                  <div className="px-4 py-3 text-xs font-semibold text-slate-400">
+                    {t.searchingAddress}
+                  </div>
+                )}
+                {addressSuggestions.map((suggestion) => (
+                  <button
+                    key={`${suggestion.lat}_${suggestion.lon}_${suggestion.display_name}`}
+                    type="button"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      handleAddressSuggestionSelect(suggestion);
+                    }}
+                    className="w-full px-4 py-3 text-left border-t border-slate-50 first:border-t-0 hover:bg-blue-50 active:bg-blue-50 transition-colors"
+                  >
+                    <span className="block text-sm font-semibold text-slate-900 line-clamp-2">
+                      {suggestion.display_name}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {error === t.addressError && (
+              <motion.div 
+                initial={{ opacity: 0, y: -5 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-2 bg-red-50 text-red-600 p-3 rounded-xl text-[11px] font-bold border border-red-100 flex items-center gap-2"
+              >
+                <div className="w-1.5 h-1.5 bg-red-600 rounded-full animate-pulse" />
+                {error}
               </motion.div>
             )}
           </div>
@@ -4383,64 +5302,65 @@ const CreateOrder = ({ onClose, onCreate, initialCategory = 'Грузчики' }
               <ChangeView center={[formData.lat, formData.lng]} />
             </MapContainer>
             <div className="absolute top-2 right-2 bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-lg text-[10px] font-bold text-slate-600 z-[1000] border border-slate-100 shadow-sm">
-              Кликните на карту для выбора адреса
+              {t.mapHint}
             </div>
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Дата</label>
-            <div className="relative">
-              <Clock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input 
-                type="text" 
-                value={formData.date}
-                onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                placeholder="24.03.2026" 
-                className="w-full p-4 pl-12 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-              />
-            </div>
+            <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">{t.date}</label>
+            <DateField
+              value={formData.date}
+              onChange={(date) => setFormData({ ...formData, date })}
+              placeholder="24.03.2026"
+            />
           </div>
           <div>
-            <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Время</label>
-            <div className="relative">
-              <Clock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input 
-                type="text" 
-                value={formData.time}
-                onChange={(e) => setFormData({ ...formData, time: e.target.value })}
-                placeholder="18:00" 
-                className="w-full p-4 pl-12 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-              />
-            </div>
+            <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">{t.time}</label>
+            <TimeField
+              value={formData.time}
+              onChange={(time) => setFormData({ ...formData, time })}
+              placeholder="18:00"
+            />
           </div>
         </div>
 
         <div>
-          <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Описание</label>
+          <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">{t.description}</label>
           <textarea 
             rows={3}
             value={formData.description}
             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-            placeholder="Опишите детали, этаж, наличие лифта..." 
+            placeholder={t.descriptionPlaceholder}
             className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none resize-none transition-all"
           />
         </div>
 
-        <div>
-          <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Оплата (₽)</label>
+        <div ref={budgetFieldRef}>
+          <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">{t.payment}</label>
           <input 
+            ref={budgetInputRef}
             type="number" 
             value={formData.budget}
-            onChange={(e) => setFormData({ ...formData, budget: e.target.value })}
+            onChange={(e) => { setFormData({ ...formData, budget: e.target.value }); setError(null); }}
             placeholder="2000" 
-            className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+            className={`w-full p-4 bg-slate-50 border ${error === t.budgetError ? 'border-red-200 ring-2 ring-red-500/10' : 'border-slate-100'} rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all`}
           />
+          {error === t.budgetError && (
+            <motion.div 
+              initial={{ opacity: 0, y: -5 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-2 bg-red-50 text-red-600 p-3 rounded-xl text-[11px] font-bold border border-red-100 flex items-center gap-2"
+            >
+              <div className="w-1.5 h-1.5 bg-red-600 rounded-full animate-pulse" />
+              {error}
+            </motion.div>
+          )}
         </div>
 
         <div>
-          <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Способ оплаты</label>
+          <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">{t.paymentMethod}</label>
           <div className="flex gap-2">
             {['Наличные', 'Карта', 'СБП'].map(method => (
               <button
@@ -4452,18 +5372,29 @@ const CreateOrder = ({ onClose, onCreate, initialCategory = 'Грузчики' }
                     : 'bg-slate-50 text-slate-500 border border-slate-100'
                 }`}
               >
-                {method}
+                {getPaymentMethodLabel(method, t)}
               </button>
             ))}
           </div>
         </div>
 
         <div className="pt-4 pb-20">
+          {error && !isFieldError && (
+            <motion.div
+              initial={{ opacity: 0, y: -5 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-4 bg-red-50 text-red-600 p-3 rounded-xl text-[11px] font-bold border border-red-100 flex items-center gap-2"
+            >
+              <AlertTriangle size={16} />
+              {error}
+            </motion.div>
+          )}
           <button 
             onClick={handleSubmit}
-            className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold text-lg shadow-lg active:scale-95 transition-transform"
+            disabled={isSubmitting}
+            className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold text-lg shadow-lg active:scale-95 transition-transform disabled:opacity-60 disabled:active:scale-100"
           >
-            Опубликовать заказ
+            {isSubmitting ? t.publishing : t.publishOrder}
           </button>
         </div>
       </div>
@@ -4472,7 +5403,7 @@ const CreateOrder = ({ onClose, onCreate, initialCategory = 'Грузчики' }
 };
 
 const LoadingScreen = () => (
-  <div className="absolute inset-0 bg-white z-[200] flex flex-col items-center justify-center p-8">
+  <div className="absolute inset-0 bg-white z-[200] flex flex-col items-center justify-center screen-shell">
     <Logo size={80} className="mb-8 animate-pulse" />
     <div className="w-48 h-1.5 bg-slate-100 rounded-full overflow-hidden relative">
       <motion.div 
@@ -4507,10 +5438,65 @@ const SkeletonCard = () => (
   </div>
 );
 
-// Error Boundary Placeholder
-const ErrorBoundary: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  return <>{children}</>;
+type ErrorBoundaryProps = {
+  children: React.ReactNode;
 };
+
+type ErrorBoundaryState = {
+  hasError: boolean;
+  errorMessage: string;
+};
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  declare props: Readonly<ErrorBoundaryProps>;
+
+  state: ErrorBoundaryState = {
+    hasError: false,
+    errorMessage: '',
+  };
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return {
+      hasError: true,
+      errorMessage: error?.message || 'Произошла неизвестная ошибка интерфейса.',
+    };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('App render error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="h-[100dvh] bg-slate-100 p-4">
+          <div className="h-full max-w-md mx-auto bg-white rounded-3xl border border-red-100 shadow-xl p-6 flex flex-col justify-center">
+            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-red-500 mb-3">
+              Ошибка интерфейса
+            </p>
+            <h1 className="text-2xl font-black text-slate-900 mb-3">
+              Приложение не смогло открыться
+            </h1>
+            <p className="text-slate-600 mb-4 leading-relaxed">
+              Ниже текст ошибки, который поможет быстро понять причину.
+            </p>
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm text-slate-800 break-words">
+              {this.state.errorMessage}
+            </div>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-6 w-full bg-slate-900 text-white py-4 rounded-2xl font-bold"
+            >
+              Перезагрузить страницу
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -4518,16 +5504,20 @@ export default function App() {
   const [currentUserProfile, setCurrentUserProfile] = useState<User | null>(null);
   
   const [role, setRole] = useState<UserRole>('customer');
-  const user = currentUserProfile || (role === 'customer' ? MOCK_USER_CUSTOMER : (role === 'worker' ? MOCK_USER_WORKER : MOCK_USER_DISPATCHER));
+  const user = currentUserProfile || { id: firebaseUser?.uid || '', name: '', role, avatar: '', rating: 0 };
   const currentUserId = currentUserProfile?.id || firebaseUser?.uid || user.id;
   const [activeTab, setActiveTab] = useState('home');
   const [orders, setOrders] = useState<Order[]>([]);
   const [workers, setWorkers] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
-  const [chats, setChats] = useState<Chat[]>([]);
+  const [rawChats, setRawChats] = useState<Chat[]>([]);
+  const [chatProfiles, setChatProfiles] = useState<Record<string, any>>({});
   const [isCreating, setIsCreating] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const shownNotificationIdsRef = useRef<Set<string>>(new Set());
+  const notificationsReadyRef = useRef(false);
+  const hasRequestedInitialLocationRef = useRef(false);
 
   const handleMarkAsRead = async (id: string) => {
     try {
@@ -4545,6 +5535,7 @@ export default function App() {
   const [lang, setLang] = useState<'ru' | 'en'>('ru');
   const [isRegistering, setIsRegistering] = useState(false);
   const [viewingWorkerId, setViewingWorkerId] = useState<string | null>(null);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
@@ -4562,30 +5553,50 @@ export default function App() {
 
   // Fetch real orders
   useEffect(() => {
-    setIsLoading(true);
-    const unsub = orderService.getOrders((fetchedOrders) => {
-      setOrders(fetchedOrders as Order[]);
+    if (!isLoggedIn) {
+      setOrders([]);
       setIsLoading(false);
-    });
-    return unsub;
-  }, []);
+      return;
+    }
+
+    setIsLoading(true);
+    const timeout = setTimeout(() => setIsLoading(false), 5000); // таймаут 5 сек
+    const unsub = orderService.getOrders(
+      (fetchedOrders) => {
+        clearTimeout(timeout);
+        setOrders(fetchedOrders as Order[]);
+        setIsLoading(false);
+      },
+      (error) => {
+        clearTimeout(timeout);
+        console.error('Orders subscription failed:', error);
+        setIsLoading(false);
+      }
+    );
+    return () => { unsub(); clearTimeout(timeout); };
+  }, [isLoggedIn]);
 
   // Fetch real workers
   useEffect(() => {
+    if (!isLoggedIn) {
+      setWorkers([]);
+      return;
+    }
+
     const unsub = orderService.getWorkers((fetchedWorkers) => {
       setWorkers(fetchedWorkers);
     });
     return unsub;
-  }, []);
+  }, [isLoggedIn]);
 
   // Fetch real chats
   useEffect(() => {
     if (!firebaseUser) {
-      setChats([]);
+      setRawChats([]);
       return;
     }
     const unsub = chatService.getChats(firebaseUser.uid, (fetchedChats) => {
-      setChats(fetchedChats);
+      setRawChats(fetchedChats as Chat[]);
     });
     return unsub;
   }, [firebaseUser]);
@@ -4594,6 +5605,8 @@ export default function App() {
   useEffect(() => {
     if (!firebaseUser) {
       setNotifications([]);
+      shownNotificationIdsRef.current.clear();
+      notificationsReadyRef.current = false;
       return;
     }
     const q = query(
@@ -4608,21 +5621,38 @@ export default function App() {
         ...doc.data()
       })) as Notification[];
       setNotifications(newNotifications);
+
+      const addedUnread = snapshot.docChanges()
+        .filter(change => change.type === 'added')
+        .map(change => ({ id: change.doc.id, data: change.doc.data() as Notification }))
+        .filter(({ id, data }) => !data.isRead && !shownNotificationIdsRef.current.has(id));
+
+      if (notificationsReadyRef.current) {
+        addedUnread.forEach(({ id, data }) => {
+          shownNotificationIdsRef.current.add(id);
+          void showDeviceNotification(data.title, data.message);
+        });
+      } else {
+        snapshot.docs.forEach(item => shownNotificationIdsRef.current.add(item.id));
+        notificationsReadyRef.current = true;
+      }
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'notifications');
+      console.error('Error listening to notifications:', error);
     });
     return unsub;
   }, [currentUserId]);
 
   // Keep selectedOrder in sync with orders array
   useEffect(() => {
-    if (selectedOrder) {
-      const updatedOrder = orders.find(o => o.id === selectedOrder.id);
-      if (updatedOrder) {
-        setSelectedOrder(updatedOrder);
-      }
+    if (!selectedOrder) return;
+
+    const updatedOrder = orders.find(o => o.id === selectedOrder.id);
+    if (!updatedOrder) return;
+
+    if (JSON.stringify(updatedOrder) !== JSON.stringify(selectedOrder)) {
+      setSelectedOrder(updatedOrder);
     }
-  }, [orders]);
+  }, [orders, selectedOrder]);
 
   // Fetch user profile when firebaseUser changes
   useEffect(() => {
@@ -4633,23 +5663,221 @@ export default function App() {
 
     // Query by uid field instead of document ID to handle session changes
     const userRef = doc(db, 'users', firebaseUser.uid);
+    let profileResolved = false;
+    const missingProfileTimeout = window.setTimeout(() => {
+      if (profileResolved) return;
+      console.error('User profile was not found for authenticated user:', firebaseUser.uid);
+      setCurrentUserProfile(null);
+      setIsLoggedIn(false);
+      setIsAuthChecking(false);
+    }, 8000);
+
     const unsub = onSnapshot(userRef, (snapshot) => {
       if (snapshot.exists()) {
+        profileResolved = true;
+        window.clearTimeout(missingProfileTimeout);
         const profile = { id: snapshot.id, ...snapshot.data() } as User;
         setCurrentUserProfile(profile);
         setRole(profile.role);
+        setIsLoggedIn(true);
+        setIsAuthChecking(false);
       }
+    }, (error) => {
+      profileResolved = true;
+      window.clearTimeout(missingProfileTimeout);
+      console.error('Error loading user profile:', error);
+      setCurrentUserProfile(null);
+      setIsLoggedIn(false);
+      setIsAuthChecking(false);
     });
-    return unsub;
+    return () => {
+      window.clearTimeout(missingProfileTimeout);
+      unsub();
+    };
   }, [firebaseUser]);
+
+  useEffect(() => {
+    if (!firebaseUser || rawChats.length === 0) return;
+
+    const currentUid = firebaseUser.uid;
+    const idsToLoad: string[] = Array.from(
+      new Set(
+        rawChats
+          .map((chat) => {
+            if (user?.role === 'dispatcher') {
+              if (chat.participantRole === 'customer') return chat.customerId;
+              if (chat.participantRole === 'worker') return chat.workerId;
+              return chat.customerId || chat.workerId;
+            }
+            if (chat.customerId === currentUid) return chat.dispatcherId || chat.workerId;
+            if (chat.workerId === currentUid) return chat.dispatcherId || chat.customerId;
+            if (chat.dispatcherId === currentUid) return chat.customerId || chat.workerId;
+            return chat.customerId || chat.workerId || chat.dispatcherId;
+          })
+          .filter((id): id is string => !!id && id !== 'support')
+          .filter((id) => !workers.some((w) => w.id === id || w.uid === id))
+          .filter((id) => !chatProfiles[id])
+      )
+    );
+
+    if (idsToLoad.length === 0) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const snapshots = await Promise.all(
+          idsToLoad.map((id) => getDoc(doc(db, 'users', id)))
+        );
+
+        if (cancelled) return;
+
+        const loadedEntries = snapshots
+          .map((snap, index) => {
+            if (!snap.exists()) return null;
+            return [idsToLoad[index], { id: snap.id, ...snap.data() }] as const;
+          })
+          .filter(Boolean) as Array<readonly [string, any]>;
+
+        if (loadedEntries.length === 0) return;
+
+        setChatProfiles((prev) => {
+          const next = { ...prev };
+          let changed = false;
+
+          for (const [id, profile] of loadedEntries) {
+            if (!next[id]) {
+              next[id] = profile;
+              changed = true;
+            }
+          }
+
+          return changed ? next : prev;
+        });
+      } catch (error) {
+        console.error('Error loading chat profiles:', error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [rawChats, firebaseUser, workers, user?.role, chatProfiles]);
+
+  const chats = useMemo(() => {
+    if (!firebaseUser) return [] as Chat[];
+
+    const currentUid = firebaseUser.uid;
+
+    return rawChats.map((chat) => {
+      let otherUserId: string | undefined;
+
+      if (user?.role === 'dispatcher') {
+        if (chat.participantRole === 'customer') {
+          otherUserId = chat.customerId;
+        } else if (chat.participantRole === 'worker') {
+          otherUserId = chat.workerId;
+        } else {
+          otherUserId = chat.customerId || chat.workerId;
+        }
+      } else if (chat.customerId === currentUid) {
+        otherUserId = chat.dispatcherId || chat.workerId;
+      } else if (chat.workerId === currentUid) {
+        otherUserId = chat.dispatcherId || chat.customerId;
+      } else if (chat.dispatcherId === currentUid) {
+        otherUserId = chat.customerId || chat.workerId;
+      } else {
+        otherUserId = chat.customerId || chat.workerId || chat.dispatcherId;
+      }
+
+      if (!otherUserId || otherUserId === 'support') {
+        return {
+          ...chat,
+          otherUserName: 'Диспетчер',
+          otherUserAvatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=support&backgroundColor=b6e3f4'
+        };
+      }
+
+      const workerProfile = workers.find(w => w.id === otherUserId || w.uid === otherUserId);
+      const cachedProfile = chatProfiles[otherUserId];
+      const profile = workerProfile || cachedProfile;
+
+      let fallbackName = 'Пользователь';
+      if (chat.customerId === otherUserId) fallbackName = 'Клиент';
+      if (chat.workerId === otherUserId) fallbackName = 'Исполнитель';
+      if (chat.dispatcherId === otherUserId) fallbackName = 'Диспетчер';
+
+      return {
+        ...chat,
+        otherUserName: profile?.name || fallbackName,
+        otherUserAvatar: profile?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${otherUserId}`
+      };
+    });
+  }, [rawChats, firebaseUser, workers, chatProfiles, user?.role]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !firebaseUser || role === 'dispatcher' || hasRequestedInitialLocationRef.current) return;
+    if (!navigator.geolocation) return;
+
+    const storageKey = `gruzok_location_permission_requested_${firebaseUser.uid}`;
+    const alreadyRequested = window.localStorage.getItem(storageKey) === '1';
+    const hasSavedLocation = Number.isFinite(currentUserProfile?.lat) && Number.isFinite(currentUserProfile?.lng);
+    if (alreadyRequested && hasSavedLocation) return;
+
+    hasRequestedInitialLocationRef.current = true;
+    window.localStorage.setItem(storageKey, '1');
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        try {
+          await updateDoc(doc(db, 'users', firebaseUser.uid), {
+            lat,
+            lng,
+            lastLocationAt: serverTimestamp(),
+          });
+        } catch (error) {
+          console.error('Error saving initial location:', error);
+        }
+      },
+      (error) => {
+        const denied = error.code === error.PERMISSION_DENIED;
+        if (denied) {
+          console.info('Location permission was denied by user');
+        } else {
+          console.warn('Initial location request failed:', error);
+        }
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+    );
+  }, [isLoggedIn, firebaseUser, role, currentUserProfile?.lat, currentUserProfile?.lng]);
 
 
   // Push Notifications Integration
   useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
+    void setupDeviceNotifications();
   }, []);
+
+  useEffect(() => {
+    if (!firebaseUser?.uid) return;
+
+    let cleanup: (() => void) | undefined;
+    let cancelled = false;
+
+    registerPushNotifications(firebaseUser.uid).then((dispose) => {
+      if (cancelled) {
+        dispose();
+        return;
+      }
+      cleanup = dispose;
+    });
+
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
+  }, [firebaseUser?.uid]);
 
   const notifyUser = useCallback(async (targetUserId: string, title: string, body: string, type: Notification['type'] = 'system') => {
     try {
@@ -4667,18 +5895,33 @@ export default function App() {
   }, []);
 
   const sendPushNotification = useCallback(async (title: string, body: string, type: Notification['type'] = 'system') => {
-    // Browser notification
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification(title, {
-        body,
-        icon: 'https://ais-dev-ujdnun7ulual234fmcddyi-216250874567.europe-west1.run.app/favicon.ico'
-      });
-    }
-
-    // Save to Firestore for current user
     if (currentUserId) {
       notifyUser(currentUserId, title, body, type);
     }
+  }, [currentUserId, notifyUser]);
+
+  const notifyOrderParticipants = useCallback(async (
+    order: Order,
+    title: string,
+    body: string,
+    options: { includeCurrentUser?: boolean } = {}
+  ) => {
+    const recipientIds = new Set<string>();
+    const includeCurrentUser = options.includeCurrentUser ?? true;
+
+    if (order.customerId) recipientIds.add(order.customerId);
+    if (order.workerId) recipientIds.add(order.workerId);
+    order.assignedWorkers?.forEach(worker => {
+      if (worker.id) recipientIds.add(worker.id);
+    });
+
+    if (!includeCurrentUser && currentUserId) {
+      recipientIds.delete(currentUserId);
+    }
+
+    await Promise.all(
+      Array.from(recipientIds).map(userId => notifyUser(userId, title, body, 'order'))
+    );
   }, [currentUserId, notifyUser]);
 
   const lastNotifiedOrderId = useRef<string | null>(null);
@@ -4701,58 +5944,60 @@ export default function App() {
           }
         }
       }
-
-      // 2. Status Change Notifications (for involved parties)
-      if (prevOrdersRef.current.length > 0) {
-        orders.forEach(order => {
-          const prevOrder = prevOrdersRef.current.find(o => o.id === order.id);
-          if (prevOrder && prevOrder.status !== order.status) {
-            const statusLabels: Record<string, string> = {
-              'open': 'Открыт',
-              'in-progress': 'В работе',
-              'completed': 'Завершен'
-            };
-
-            const title = `Заказ #${order.id.slice(-4)}: ${statusLabels[order.status] || order.status}`;
-            const body = `Статус заказа "${order.title}" изменился на "${statusLabels[order.status] || order.status}"`;
-
-            // Notify Customer
-            if (order.customerId) {
-              notifyUser(order.customerId, title, body, 'order');
-            }
-            // Notify Assigned Workers
-            if (order.workerId) {
-              notifyUser(order.workerId, title, body, 'order');
-            }
-            if (order.assignedWorkers) {
-              order.assignedWorkers.forEach(w => notifyUser(w.id, title, body, 'order'));
-            }
-          }
-        });
-      }
       prevOrdersRef.current = orders;
     }
-  }, [orders, role, currentUserId, sendPushNotification, notifyUser]);
+  }, [orders, role, sendPushNotification]);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (user) => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      setIsAuthChecking(true);
       if (user) {
         setFirebaseUser(user);
-        setIsLoggedIn(true);
+        // Ставим онлайн
+        try {
+          await updateDoc(doc(db, 'users', user.uid), { isOnline: true });
+        } catch {}
       } else {
         setFirebaseUser(null);
+        setCurrentUserProfile(null);
         setIsLoggedIn(false);
+        setIsAuthChecking(false);
       }
     });
-    return unsub;
+
+    // Ставим оффлайн при закрытии вкладки
+    const handleOffline = async () => {
+      const uid = auth.currentUser?.uid;
+      if (uid) {
+        try { await updateDoc(doc(db, 'users', uid), { isOnline: false }); } catch {}
+      }
+    };
+    window.addEventListener('beforeunload', handleOffline);
+
+    return () => {
+      unsub();
+      window.removeEventListener('beforeunload', handleOffline);
+    };
   }, []);
 
   const handleCreateChat = async (orderId: string, workerId: string) => {
-    const chatId = await chatService.getOrCreateChat(orderId, currentUserId, workerId);
-    const profile = MOCK_WORKER_PROFILES[workerId];
+    const existingChat = chats.find((chat) => {
+      if (chat.participants?.includes(currentUserId) && chat.participants?.includes(workerId)) {
+        return true;
+      }
+
+      return (
+        (chat.customerId === currentUserId && chat.workerId === workerId) ||
+        (chat.customerId === workerId && chat.workerId === currentUserId)
+      );
+    });
+    const chatId = existingChat?.id || await chatService.getOrCreateChat(orderId, currentUserId, workerId);
+    const profile = workers.find(w => w.id === workerId || w.uid === workerId);
     setSelectedChat({
+      ...(existingChat || {}),
       id: chatId,
-      orderId,
+      orderId: existingChat?.orderId || 'direct',
+      participants: existingChat?.participants || [currentUserId, workerId].sort(),
       customerId: currentUserId,
       workerId,
       otherUserName: profile?.name || 'Грузчик',
@@ -4763,34 +6008,34 @@ export default function App() {
 
   const handleShowSupport = async () => {
     const uid = currentUserId;
-    if (!uid) {
-      console.error("User ID not found");
-      return;
-    }
+    if (!uid) return;
+    if (role === 'dispatcher') return;
+
+    setShowSettings(false);
+    setShowNotifications(false);
+    setShowOrderHistory(false);
+    setSelectedOrder(null);
+    setViewingWorkerId(null);
+    setIsCreating(null);
+    setShowRules(false);
     
     try {
-      const chatId = await chatService.getOrCreateChat('support_order', uid, 'support');
+      const supportChatOptions = role === 'worker'
+        ? { workerId: uid, dispatcherId: 'support' }
+        : { customerId: uid, dispatcherId: 'support' };
+      const chatId = await chatService.getOrCreateChat('support_order', uid, 'support', supportChatOptions);
       setSelectedChat({
         id: chatId,
-        orderId: 'support_order',
-        customerId: uid,
-        workerId: 'support',
+        orderId: 'direct',
+        participants: [uid, 'support'].sort(),
+        ...supportChatOptions,
         otherUserName: 'Диспетчер (Поддержка)',
         otherUserAvatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=support&backgroundColor=b6e3f4'
       });
       setActiveTab('chat');
     } catch (error) {
       console.error("Error opening support chat:", error);
-      // Fallback for UI if Firebase fails (e.g. offline or rules)
-      setSelectedChat({
-        id: 'temp_support_chat',
-        orderId: 'support_order',
-        customerId: uid,
-        workerId: 'support',
-        otherUserName: 'Диспетчер (Поддержка)',
-        otherUserAvatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=support&backgroundColor=b6e3f4'
-      });
-      setActiveTab('chat');
+      alert('Не удалось открыть чат поддержки. Проверьте интернет и попробуйте еще раз.');
     }
   };
 
@@ -4803,10 +6048,28 @@ export default function App() {
       confirmText: 'Выйти',
       onConfirm: async () => {
         try {
+          if (firebaseUser) {
+            await updateDoc(doc(db, 'users', firebaseUser.uid), { isOnline: false });
+          }
           await authService.logout();
+          // Сбрасываем всё
           setIsLoggedIn(false);
           setFirebaseUser(null);
           setCurrentUserProfile(null);
+          setOrders([]);
+          setWorkers([]);
+          setRawChats([]);
+          setChatProfiles({});
+          setNotifications([]);
+          setSelectedOrder(null);
+          setSelectedChat(null);
+          setActiveTab('home');
+          setRole('customer');
+          setIsCreating(null);
+          setViewingWorkerId(null);
+          setShowSettings(false);
+          setShowNotifications(false);
+          setShowOrderHistory(false);
         } catch (error) {
           console.error("Logout error:", error);
         }
@@ -4835,14 +6098,24 @@ export default function App() {
   };
 
   const handleCreateOrder = async (orderData: Partial<Order>) => {
-    const newOrderData = {
+    const customerId = firebaseUser?.uid;
+    if (!customerId) {
+      console.error('Cannot create order without authenticated Firebase user');
+      return 'Не удалось создать заказ: пользователь не авторизован. Выйдите и войдите снова.';
+    }
+
+    const safeCategory = typeof orderData.category === 'string' && orderData.category.trim()
+      ? orderData.category.trim()
+      : 'Разное';
+
+    let newOrderData = {
       title: orderData.title || '',
       description: orderData.description || '',
       budget: orderData.budget || 0,
       address: orderData.address || '',
-      category: orderData.category || 'Разное',
-      customerId: currentUserId,
-      status: 'pending_negotiation' as Order['status'],
+      category: safeCategory,
+      customerId,
+      status: 'open' as Order['status'],
       time: orderData.time || '',
       date: orderData.date || '',
       workersCount: orderData.workersCount || 1,
@@ -4853,47 +6126,84 @@ export default function App() {
     };
 
     try {
-      const docRef = await addDoc(collection(db, 'orders'), newOrderData);
+      let docRef;
+      try {
+        docRef = await addDoc(collection(db, 'orders'), newOrderData);
+      } catch (error: any) {
+        const errorText = `${error?.code || ''} ${error?.message || error}`;
+        const canRetryAsOpen =
+          newOrderData.status === 'pending_negotiation' &&
+          errorText.includes('permission-denied');
+
+        if (!canRetryAsOpen) throw error;
+
+        console.warn('Order create with pending_negotiation was rejected, retrying with open status:', error);
+        newOrderData = {
+          ...newOrderData,
+          status: 'open' as Order['status'],
+        };
+        docRef = await addDoc(collection(db, 'orders'), newOrderData);
+      }
+
       const newOrder: Order = {
         id: docRef.id,
         ...newOrderData,
         createdAt: undefined // Will be handled by snapshot
       } as Order;
       
-      setOrders([newOrder, ...orders]);
       setIsCreating(null);
       
       // Notify about new order
       if (newOrder.status === 'pending_negotiation') {
-        sendPushNotification('Диспетчер: Новый заказ', `Заказ "${newOrder.title}" требует согласования бюджета.`);
+        // Уведомляем только диспетчеров
+        workers
+          .filter(w => w.role === 'dispatcher')
+          .forEach(dispatcher => {
+            notifyUser(
+              dispatcher.uid || dispatcher.id,
+              'Новый заказ на согласование',
+              `Заказ "${newOrder.title}" требует согласования бюджета.`,
+              'order'
+            );
+          });
       } else {
-        // Notify matching workers
+        // Уведомляем подходящих исполнителей
         workers.forEach(worker => {
           if (worker.role === 'worker') {
             const matchesSkill = !worker.skills || worker.skills.length === 0 || 
-                               worker.skills.some((s: string) => newOrder.category.toLowerCase().includes(s.toLowerCase()) || 
-                               newOrder.title.toLowerCase().includes(s.toLowerCase()));
+              worker.skills.some((s: string) => 
+                newOrder.category.toLowerCase().includes(s.toLowerCase()) || 
+                newOrder.title.toLowerCase().includes(s.toLowerCase())
+              );
             
             let matchesLocation = true;
             if (newOrder.lat && newOrder.lng && worker.lat && worker.lng) {
               const dist = calculateDistance(newOrder.lat, newOrder.lng, worker.lat, worker.lng);
-              matchesLocation = dist <= 20; // Notify workers within 20km
+              matchesLocation = dist <= 20;
             }
 
             if (matchesSkill && matchesLocation) {
-              notifyUser(worker.uid || worker.id, 'Новый подходящий заказ!', `В категории "${newOrder.category}" появился заказ: "${newOrder.title}"`, 'order');
+              notifyUser(
+                worker.uid || worker.id,
+                'Новый подходящий заказ!',
+                `В категории "${newOrder.category}" появился заказ: "${newOrder.title}". Бюджет: ${newOrder.budget} ₽`,
+                'order'
+              );
             }
           }
         });
-
-        if (newOrder.budget >= 5000) {
-          sendPushNotification('🔥 Высокооплачиваемый заказ!', `В вашем районе доступен заказ "${newOrder.title}" с бюджетом ${newOrder.budget} ₽!`);
-        } else {
-          sendPushNotification('Новый заказ', `В вашем районе опубликован новый заказ: "${newOrder.title}"`);
-        }
       }
+      return true;
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'orders');
+      console.error('Error creating order:', error);
+      const errorText = error instanceof Error ? error.message : String(error);
+      try {
+        handleFirestoreError(error, OperationType.WRITE, 'orders');
+      } catch {}
+      if (errorText.includes('permission-denied')) {
+        return 'Firebase не разрешил создать заказ. Нужно обновить правила Firestore для новой базы или проверить авторизацию.';
+      }
+      return `Не удалось создать заказ: ${errorText.slice(0, 180)}`;
     }
   };
 
@@ -4917,45 +6227,49 @@ export default function App() {
         'completed': 'завершен'
       };
       
-      sendPushNotification('Обновление заказа', `Статус заказа "${order.title}" изменен на "${statusLabels[status] || status}"`);
+      await notifyOrderParticipants(
+        order,
+        `Заказ #${order.id.slice(-4)}: ${statusLabels[status] || status}`,
+        `Статус заказа "${order.title}" изменен на "${statusLabels[status] || status}"`
+      );
       
       if (status === 'in-progress') {
         setTimeout(() => {
-          sendPushNotification('Исполнитель уже близко!', `Ваш исполнитель по заказу "${order.title}" будет на месте через 5 минут.`);
+          if (order.customerId) {
+            notifyUser(
+              order.customerId,
+              'Исполнитель уже близко!',
+              `Ваш исполнитель по заказу "${order.title}" будет на месте через 5 минут.`,
+              'order'
+            );
+          }
         }, 5000);
       }
 
-      if (status === 'completed') {
-        sendPushNotification('Диспетчер: Заказ завершен', `Заказ "${order.title}" был успешно завершен исполнителем.`);
-      }
     } catch (error) {
       console.error("Error updating status:", error);
     }
   };
 
-  const handleNegotiate = (orderId: string, negotiatedBudget: number, commission: number) => {
+  const handleNegotiate = async (orderId: string, negotiatedBudget: number, commission: number) => {
     const order = orders.find(o => o.id === orderId);
-    setOrders(prev => prev.map(o => o.id === orderId ? { 
-      ...o, 
-      negotiatedBudget, 
-      commission, 
-      budget: negotiatedBudget - commission,
-      status: 'open' 
-    } : o));
-    if (selectedOrder?.id === orderId) {
-      setSelectedOrder(prev => prev ? { 
-        ...prev, 
-        negotiatedBudget, 
-        commission, 
+    
+    try {
+      const orderRef = doc(db, 'orders', orderId);
+      await updateDoc(orderRef, {
+        negotiatedBudget,
+        commission,
         budget: negotiatedBudget - commission,
-        status: 'open' 
-      } : null);
+        status: 'open'
+      });
+      // Локальный стейт обновится через onSnapshot автоматически
+    } catch (error) {
+      console.error('Error negotiating budget:', error);
+      handleFirestoreError(error, OperationType.UPDATE, `orders/${orderId}`);
     }
 
     if (order) {
       sendPushNotification('Бюджет согласован', `Диспетчер установил бюджет ${negotiatedBudget} ₽ для заказа "${order.title}"`);
-      
-      // Dynamic: High-paying order notification after negotiation
       if (negotiatedBudget >= 5000) {
         sendPushNotification('🔥 Срочный премиум-заказ!', `Согласован бюджет ${negotiatedBudget} ₽ для заказа "${order.title}". Успейте откликнуться!`);
       }
@@ -4976,8 +6290,26 @@ export default function App() {
     if (!order) return;
 
     try {
+      const maxWorkers = Math.max(1, order.workersCount || 1);
+      const existingWorkers = order.assignedWorkers || [];
+      const existingIds = new Set(existingWorkers.map(w => w.id));
+      const requestedIds = Array.from(new Set(ids.filter(Boolean)));
+      const targetIds = Array.isArray(workerIds)
+        ? requestedIds.slice(0, maxWorkers)
+        : [
+            ...existingWorkers.map(w => w.id),
+            ...requestedIds.filter(id => !existingIds.has(id)),
+          ].slice(0, maxWorkers);
+
+      if (targetIds.length === existingWorkers.length && requestedIds.every(id => existingIds.has(id))) {
+        return;
+      }
+
       // Fetch real profiles for the workers
-      const newWorkers: AssignedWorker[] = await Promise.all(ids.map(async id => {
+      const selectedWorkerProfiles: AssignedWorker[] = await Promise.all(targetIds.map(async id => {
+        const existingWorker = existingWorkers.find(worker => worker.id === id);
+        if (existingWorker) return existingWorker;
+
         const docSnap = await getDoc(doc(db, 'users', id));
         if (docSnap.exists()) {
           const profile = docSnap.data();
@@ -4988,24 +6320,21 @@ export default function App() {
             status: 'assigned'
           };
         }
-        const mockProfile = MOCK_WORKER_PROFILES[id];
+        const realProfile = workers.find(w => w.id === id || w.uid === id);
         return {
           id,
-          name: mockProfile?.name || 'Исполнитель',
-          avatar: mockProfile?.avatar || '',
+          name: realProfile?.name || 'Исполнитель',
+          avatar: realProfile?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${id}`,
           status: 'assigned'
         };
       }));
-
-      const existingIds = new Set(order.assignedWorkers?.map(w => w.id) || []);
-      const workersToAdd = newWorkers.filter(w => !existingIds.has(w.id));
-      const updatedWorkers = [...(order.assignedWorkers || []), ...workersToAdd];
       
-      await orderService.assignWorkers(orderId, updatedWorkers);
+      await orderService.assignWorkers(orderId, selectedWorkerProfiles);
 
-      ids.forEach(id => {
-        const profile = MOCK_WORKER_PROFILES[id];
-        sendPushNotification('Исполнитель назначен', `На заказ "${order.title}" назначен исполнитель ${profile?.name || 'нового типа'}`);
+      requestedIds.forEach(id => {
+        if (existingIds.has(id)) return;
+        const profile = workers.find(w => w.id === id || w.uid === id);
+        sendPushNotification('Исполнитель назначен', `На заказ "${order.title}" назначен исполнитель ${profile?.name || 'Исполнитель'}`);
       });
     } catch (error) {
       console.error("Error assigning workers:", error);
@@ -5065,8 +6394,8 @@ export default function App() {
         status: 'assigned'
       };
 
-      const updatedWorkers = (order.assignedWorkers || []).map(w => 
-        w.id === oldWorkerId ? newWorker : w
+      const updatedWorkers = (order.assignedWorkers || []).map((worker) =>
+        worker.id === oldWorkerId ? newWorker : worker
       );
 
       await updateDoc(doc(db, 'orders', orderId), {
@@ -5081,24 +6410,134 @@ export default function App() {
   };
 
   const handleOpenChat = async (participantId: string, participantRole: string, orderId?: string) => {
-    let existingChat = chats.find(c => 
-      (c.customerId === participantId || c.workerId === participantId || c.dispatcherId === participantId) &&
-      (orderId ? c.orderId === orderId : true)
-    );
+    if (!currentUserId || !participantId) return;
+
+    const isDispatcher = user?.role === 'dispatcher';
+    const isOrderScopedDispatcherChat =
+      isDispatcher && !!orderId && !['manual', 'direct', 'support_order'].includes(orderId);
+
+    // Диспетчерские чаты привязаны к заказу, обычные чаты остаются прямыми между людьми.
+    const existingChat = chats.find(c => {
+      const isCurrentUserParticipant =
+        c.participants?.includes(currentUserId) ||
+        c.customerId === currentUserId ||
+        c.workerId === currentUserId ||
+        c.dispatcherId === currentUserId;
+
+      if (!isCurrentUserParticipant) return false;
+
+      if (isDispatcher) {
+        if (isOrderScopedDispatcherChat && c.orderId !== orderId) return false;
+        if (!isOrderScopedDispatcherChat && c.orderId && !['direct', 'manual'].includes(c.orderId)) return false;
+
+        if (participantRole === 'customer') {
+          return c.customerId === participantId && c.dispatcherId === currentUserId;
+        }
+
+        if (participantRole === 'worker') {
+          return c.workerId === participantId && c.dispatcherId === currentUserId;
+        }
+
+        return false;
+      }
+
+      if (c.dispatcherId && c.dispatcherId !== 'support') return false;
+
+      if (c.participants?.includes(currentUserId) && c.participants?.includes(participantId)) {
+        return true;
+      }
+
+      if (participantRole === 'customer') {
+        return c.customerId === participantId && c.workerId === currentUserId;
+      }
+
+      if (participantRole === 'worker') {
+        return c.workerId === participantId && c.customerId === currentUserId;
+      }
+
+      return false;
+    });
 
     if (existingChat) {
-      setSelectedChat(existingChat);
-    } else {
+      let profile: any = participantId === 'support'
+        ? SUPPORT_PROFILE
+        : workers.find(w => w.id === participantId || w.uid === participantId);
+
+      if (!profile && participantId !== 'support') {
+        try {
+          const snap = await getDoc(doc(db, 'users', participantId));
+          if (snap.exists()) profile = { id: snap.id, ...snap.data() };
+        } catch {}
+      }
+
+      setSelectedChat({
+        ...existingChat,
+        otherUserName: existingChat.otherUserName || profile?.name || 'Пользователь',
+        otherUserAvatar: existingChat.otherUserAvatar || profile?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${participantId}`
+      });
+
+      setSelectedOrder(null);
+      setViewingWorkerId(null);
+      setActiveTab('chat');
+      return;
+    }
+
+    try {
+      // Определяем роли в чате
+      let chatOptions: { customerId?: string; workerId?: string; dispatcherId?: string };
+
+      if (isDispatcher) {
+        if (participantRole === 'customer') {
+          chatOptions = { customerId: participantId, dispatcherId: currentUserId };
+        } else {
+          // worker
+          chatOptions = {
+            workerId: participantId,
+            dispatcherId: currentUserId
+          };
+        }
+      } else if (user?.role === 'customer') {
+        chatOptions = { customerId: currentUserId, workerId: participantId };
+      } else {
+        // worker
+        chatOptions = { customerId: participantId, workerId: currentUserId };
+      }
+
       const chatId = await chatService.getOrCreateChat(
         orderId || 'manual',
-        participantRole === 'customer' ? participantId : (user?.role === 'customer' ? user.id : undefined),
-        participantRole === 'worker' ? participantId : (user?.role === 'worker' ? user.id : undefined),
-        user?.role === 'dispatcher' ? user.id : (participantRole === 'dispatcher' ? participantId : undefined)
+        currentUserId,
+        participantId,
+        chatOptions
       );
-      
-      // The onSnapshot in App.tsx will pick up the new chat
-      // but for immediate UI response we can find it in the updated chats list
-      // or just wait for the snapshot.
+
+      let profile: any = participantId === 'support'
+        ? SUPPORT_PROFILE
+        : workers.find(w => w.id === participantId || w.uid === participantId);
+
+      if (!profile && participantId !== 'support') {
+        try {
+          const snap = await getDoc(doc(db, 'users', participantId));
+          if (snap.exists()) profile = { id: snap.id, ...snap.data() };
+        } catch {}
+      }
+
+      setSelectedChat({
+        id: chatId,
+        orderId: isOrderScopedDispatcherChat ? orderId! : 'direct',
+        participants: [currentUserId, participantId].sort(),
+        chatType: isOrderScopedDispatcherChat ? 'order' : 'direct',
+        participantRole: isDispatcher && (participantRole === 'customer' || participantRole === 'worker') ? participantRole : undefined,
+        ...chatOptions,
+        otherUserName: profile?.name || 'Пользователь',
+        otherUserAvatar: profile?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${participantId}`
+      });
+
+      setSelectedOrder(null);
+      setViewingWorkerId(null);
+      setActiveTab('chat');
+    } catch (error) {
+      console.error("Error opening chat:", error);
+      alert('Не удалось открыть чат. Проверьте интернет и попробуйте еще раз.');
     }
   };
 
@@ -5106,7 +6545,7 @@ export default function App() {
     const order = orders.find(o => o.id === orderId);
     if (!order) return;
 
-    const workerProfile = MOCK_WORKER_PROFILES[workerId];
+    const workerProfile = workers.find(w => w.id === workerId || w.uid === workerId);
     const historyEntry: StatusHistoryEntry = {
       status: status,
       timestamp: new Date().toISOString(),
@@ -5116,18 +6555,29 @@ export default function App() {
     };
 
     try {
-      const updatedWorkers = (order.assignedWorkers || []).map(w => 
-        w.id === workerId ? { ...w, status } : w
-      );
-      
       let newOrderStatus = order.status;
+
       if (status === 'at-work' && order.status === 'open') {
         newOrderStatus = 'in-progress';
       }
 
+      const nextWorkers = (order.assignedWorkers || []).map(w =>
+        w.id === workerId ? { ...w, status } : w
+      );
+
+      if (nextWorkers.length > 0 && nextWorkers.every(w => w.status === 'finished')) {
+        newOrderStatus = 'completed';
+      }
+
+      const updatedLocation =
+        status === 'on-way'
+          ? order.workerLiveLocation || null
+          : null;
+
       await updateDoc(doc(db, 'orders', orderId), {
         status: newOrderStatus,
-        assignedWorkers: updatedWorkers,
+        assignedWorkers: nextWorkers,
+        workerLiveLocation: updatedLocation,
         statusHistory: [...(order.statusHistory || []), historyEntry]
       });
 
@@ -5173,20 +6623,39 @@ export default function App() {
 
   const handleUpdateUser = async (updatedUser: User) => {
     try {
+      if (!currentUserId) {
+        console.error("currentUserId not found");
+        return;
+      }
+
       const userDocRef = doc(db, 'users', currentUserId);
       const snapshot = await getDoc(userDocRef);
-      
-      if (snapshot.exists()) {
-        await updateDoc(userDocRef, {
-          name: updatedUser.name,
-          avatar: updatedUser.avatar,
-          skills: updatedUser.skills || [],
-          experience: updatedUser.experience || '',
-          bio: updatedUser.bio || '',
-          portfolio: updatedUser.portfolio || []
-        });
-        setCurrentUserProfile(updatedUser);
+
+      if (!snapshot.exists()) {
+        console.error("User profile document not found");
+        return;
       }
+
+      const dataToUpdate = {
+        name: updatedUser.name || '',
+        phone: normalizePhone(updatedUser.phone || ''),
+        avatar: updatedUser.avatar || '',
+        skills: updatedUser.skills || [],
+        experience: updatedUser.experience || '',
+        bio: updatedUser.bio || '',
+        portfolio: updatedUser.portfolio || [],
+        role: updatedUser.role || 'customer',
+        rating: updatedUser.rating || 0,
+        completedJobs: updatedUser.completedJobs || 0,
+      };
+
+      await updateDoc(userDocRef, dataToUpdate);
+
+      setCurrentUserProfile({
+        ...updatedUser,
+        ...dataToUpdate,
+        id: currentUserId,
+      });
     } catch (error) {
       console.error("Error updating user profile:", error);
     }
@@ -5194,21 +6663,101 @@ export default function App() {
 
   const handleReview = async (orderId: string, rating: number, text: string) => {
     try {
-      await updateDoc(doc(db, 'orders', orderId), {
-        customerReviewed: role === 'customer' ? true : undefined,
-        workerReviewed: role === 'worker' ? true : undefined,
-        review: { rating, text, createdAt: new Date().toISOString() }
+      const order = orders.find(o => o.id === orderId);
+      if (!order || !currentUserId) return false;
+
+      const trimmedText = text.trim();
+      if (rating < 1 || rating > 5 || !trimmedText) return false;
+
+      const targetUserId =
+        role === 'customer'
+          ? (order.workerId || order.assignedWorkers?.[0]?.id)
+          : order.customerId;
+
+      if (!targetUserId) {
+        console.error('Review target user not found');
+        return false;
+      }
+
+      const authorName = currentUserProfile?.name || user.name || 'Пользователь';
+      const authorAvatar = currentUserProfile?.avatar || user.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUserId}`;
+      const reviewId = `${orderId}_${currentUserId}`;
+      const createdAt = new Date().toISOString();
+      const review: Review = {
+        id: reviewId,
+        orderId,
+        authorId: currentUserId,
+        author: authorName,
+        avatar: authorAvatar,
+        targetId: targetUserId,
+        targetRole: role === 'customer' ? 'worker' : 'customer',
+        rating,
+        text: trimmedText,
+        date: new Date().toLocaleDateString('ru-RU'),
+      };
+
+      const targetRef = doc(db, 'users', targetUserId);
+      const targetSnap = await getDoc(targetRef);
+      if (!targetSnap.exists()) {
+        console.error('Review target profile not found');
+        return false;
+      }
+
+      const targetData = targetSnap.data();
+      const previousReviews = Array.isArray(targetData.reviews) ? targetData.reviews : [];
+      const nextReviews = [
+        ...previousReviews.filter((item: Review) => item.id !== reviewId),
+        review,
+      ];
+      const nextRating = Math.round(
+        (nextReviews.reduce((sum: number, item: Review) => sum + (item.rating || 0), 0) / nextReviews.length) * 10
+      ) / 10;
+
+      await updateDoc(targetRef, {
+        reviews: nextReviews,
+        rating: nextRating,
+        reviewsCount: nextReviews.length,
       });
+
+      const orderReviews = Array.isArray(order.reviews) ? order.reviews : [];
+      const nextOrderReviews = [
+        ...orderReviews.filter((item) => item.id !== reviewId),
+        { ...review, createdAt },
+      ];
+      const updateData: any = {
+        reviews: nextOrderReviews,
+        review: { ...review, createdAt },
+      };
+
+      if (role === 'customer') updateData.customerReviewed = true;
+      if (role === 'worker') updateData.workerReviewed = true;
+
+      await updateDoc(doc(db, 'orders', orderId), updateData);
       sendPushNotification('Отзыв отправлен', 'Спасибо за вашу оценку!');
+      return true;
     } catch (error) {
       console.error("Error adding review:", error);
+      return false;
     }
   };
+
+  if (isAuthChecking) {
+    return (
+      <ErrorBoundary>
+        <div className="h-[100dvh] overflow-hidden bg-slate-100">
+          <div className="h-full max-w-md mx-auto bg-white overflow-hidden relative flex flex-col">
+            <LoadingScreen />
+          </div>
+        </div>
+      </ErrorBoundary>
+    );
+  }
 
   if (!isLoggedIn) {
     return (
       <ErrorBoundary>
-        <div className="mobile-container">
+        <div className="h-[100dvh] overflow-hidden bg-slate-100">
+          <div className="h-full max-w-md mx-auto bg-white overflow-hidden relative flex flex-col">
           <AnimatePresence>
             {isRegistering ? (
               <Register 
@@ -5255,7 +6804,7 @@ export default function App() {
             )}
           </AnimatePresence>
           {confirmDialog.isOpen && (
-            <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 bg-black/50 backdrop-blur-sm">
+            <div className="absolute inset-0 z-[300] flex items-center justify-center p-6 bg-black/50 backdrop-blur-sm">
               <motion.div 
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
@@ -5274,6 +6823,7 @@ export default function App() {
               </motion.div>
             </div>
           )}
+          </div>
         </div>
       </ErrorBoundary>
     );
@@ -5281,95 +6831,97 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className="mobile-container overflow-hidden">
-      <AnimatePresence>
-        {isLoading && <LoadingScreen />}
-      </AnimatePresence>
+      <div className="h-[100dvh] overflow-hidden bg-slate-100">
+        <div className="h-full max-w-md mx-auto bg-white flex flex-col relative overflow-hidden">
+          <Header 
+            title={activeTab === 'home' ? (role === 'customer' ? 'ГрузОК' : TRANSLATIONS[lang].orders) : activeTab === 'chat' ? TRANSLATIONS[lang].chats : TRANSLATIONS[lang].profile} 
+          />
+          
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <AnimatePresence mode="wait">
+              {activeTab === 'home' && (
+                <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full flex flex-col overflow-hidden">
+                  {role === 'customer' ? (
+                    <CustomerHome 
+                      user={user} 
+                      orders={orders} 
+                      workers={workers}
+                      lang={lang}
+                      onOrderClick={setSelectedOrder} 
+                      onWorkerClick={setViewingWorkerId}
+                      onCreateClick={(category) => setIsCreating(category || 'Грузчики')} 
+                      onShowSupport={handleShowSupport}
+                      isLoading={isLoading}
+                    />
+                  ) : role === 'worker' ? (
+                    <WorkerHome 
+                      user={user}
+                      orders={orders} 
+                      workers={workers}
+                      lang={lang}
+                      onOrderClick={setSelectedOrder} 
+                      onQuickApply={handleQuickApply}
+                      onWorkerClick={setViewingWorkerId}
+                      onShowSupport={handleShowSupport}
+                      isLoading={isLoading}
+                      currentUserId={currentUserId}
+                    />
+                  ) : (
+                    <DispatcherAdmin 
+                      user={user}
+                      orders={orders}
+                      chats={chats}
+                      workers={workers}
+                      onOrderClick={setSelectedOrder}
+                      onWorkerClick={setViewingWorkerId}
+                      onOpenChat={handleOpenChat}
+                    />
+                  )}
+                </motion.div>
+              )}
+              {activeTab === 'chat' && (
+                <motion.div key="chat" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full flex flex-col overflow-hidden">
+                  <ChatList userId={currentUserId} chats={chats} lang={lang} onChatClick={setSelectedChat} />
+                </motion.div>
+              )}
+              {activeTab === 'profile' && (
+                <motion.div key="profile" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full flex flex-col overflow-hidden">
+                  <Profile 
+                    user={user} 
+                    orders={orders}
+                    lang={lang}
+                    onLogout={handleLogout} 
+                    onUpdateUser={handleUpdateUser}
+                    onShowHistory={() => setShowOrderHistory(true)}
+                    onShowNotifications={() => setShowNotifications(true)}
+                    onShowSettings={() => setShowSettings(true)}
+                    onShowSupport={handleShowSupport}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
 
-      <Header 
-        title={activeTab === 'home' ? (role === 'customer' ? 'ГрузОК' : 'Заказы') : activeTab === 'chat' ? 'Чаты' : 'Профиль'} 
-        role={role}
-        setRole={setRole}
-      />
-      
-      <AnimatePresence mode="wait">
-        {activeTab === 'home' && (
-          <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex-1 flex flex-col overflow-hidden">
-            {role === 'customer' ? (
-              <CustomerHome 
-                user={user} 
-                orders={orders} 
-                workers={workers}
-                onOrderClick={setSelectedOrder} 
-                onWorkerClick={setViewingWorkerId}
-                onCreateClick={(category) => setIsCreating(category || 'Грузчики')} 
-                onShowSupport={handleShowSupport}
-                isLoading={isLoading}
-              />
-            ) : role === 'worker' ? (
-              <WorkerHome 
-                orders={orders} 
-                workers={workers}
-                onOrderClick={setSelectedOrder} 
-                onQuickApply={handleQuickApply}
-                onWorkerClick={setViewingWorkerId}
-                onShowSupport={handleShowSupport}
-                isLoading={isLoading}
-              />
-            ) : (
-              <DispatcherAdmin 
-                user={user}
-                orders={orders}
-                chats={chats}
-                workers={workers}
-                onOrderClick={setSelectedOrder}
-                onWorkerClick={setViewingWorkerId}
-                onOpenChat={handleOpenChat}
-              />
-            )}
-          </motion.div>
-        )}
-        {activeTab === 'chat' && (
-          <motion.div key="chat" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex-1 flex flex-col overflow-hidden">
-            <ChatList userId={currentUserId} chats={chats} onChatClick={setSelectedChat} />
-          </motion.div>
-        )}
-        {activeTab === 'profile' && (
-          <motion.div key="profile" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex-1 flex flex-col overflow-hidden">
-            <Profile 
-              user={user} 
-              orders={orders}
-              onLogout={handleLogout} 
-              onUpdateUser={handleUpdateUser}
-              onShowHistory={() => setShowOrderHistory(true)}
-              onShowNotifications={() => setShowNotifications(true)}
-              onShowSettings={() => setShowSettings(true)}
-              onShowSupport={handleShowSupport}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
+          {/* Navigation */}
+          <nav className="shrink-0 bg-white border-t border-slate-100 page-gutters pt-4 bottom-tabbar flex justify-between items-center rounded-2xl shadow-lg">
+            {[
+              { id: 'home', icon: <Briefcase size={24} />, label: TRANSLATIONS[lang].home },
+              { id: 'chat', icon: <MessageSquare size={24} />, label: TRANSLATIONS[lang].chats },
+              { id: 'profile', icon: <UserIcon size={24} />, label: TRANSLATIONS[lang].profile },
+            ].map(tab => (
+              <button 
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex flex-col items-center gap-1 ${activeTab === tab.id ? 'text-blue-600' : 'text-slate-400'}`}
+              >
+                {tab.icon}
+                <span className="text-[10px] font-bold uppercase tracking-tighter">{tab.label}</span>
+              </button>
+            ))}
+          </nav>
 
-      {/* Navigation */}
-      <nav className="bg-white border-t border-slate-100 px-8 py-4 flex justify-between items-center safe-area-bottom">
-        {[
-          { id: 'home', icon: <Briefcase size={24} />, label: 'Главная' },
-          { id: 'chat', icon: <MessageSquare size={24} />, label: 'Чаты' },
-          { id: 'profile', icon: <UserIcon size={24} />, label: 'Профиль' },
-        ].map(tab => (
-          <button 
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex flex-col items-center gap-1 ${activeTab === tab.id ? 'text-blue-600' : 'text-slate-400'}`}
-          >
-            {tab.icon}
-            <span className="text-[10px] font-bold uppercase tracking-tighter">{tab.label}</span>
-          </button>
-        ))}
-      </nav>
-
-      {/* Overlays */}
-      <AnimatePresence>
+          {/* Overlays */}
+          <AnimatePresence>
         {selectedOrder && (
           <OrderDetails 
             order={selectedOrder} 
@@ -5389,7 +6941,9 @@ export default function App() {
             onReplaceWorker={handleReplaceWorker}
             onOpenChat={handleOpenChat}
             onBid={handleBid}
+            onCompleteOrder={(id) => handleUpdateStatus(id, 'completed')}
             onShowSupport={handleShowSupport}
+            lang={lang}
             viewingWorkerId={viewingWorkerId}
             setViewingWorkerId={setViewingWorkerId}
           />
@@ -5397,6 +6951,7 @@ export default function App() {
         {isCreating && (
           <CreateOrder 
             initialCategory={isCreating}
+            lang={lang}
             onClose={handleBack} 
             onCreate={handleCreateOrder} 
           />
@@ -5405,6 +6960,7 @@ export default function App() {
           <OrderHistory 
             user={user}
             orders={orders}
+            lang={lang}
             onOrderClick={setSelectedOrder}
             onWorkerClick={setViewingWorkerId}
             onBack={handleBack}
@@ -5423,7 +6979,7 @@ export default function App() {
                 setShowNotifications(false);
               }
             }}
-            onShowSupport={handleShowSupport}
+            onShowSupport={role !== 'dispatcher' ? handleShowSupport : undefined}
           />
         )}
         {showSettings && (
@@ -5441,6 +6997,7 @@ export default function App() {
             workerId={viewingWorkerId} 
             workers={workers}
             orders={orders}
+            role={role}
             onBack={handleBack} 
             onOrderClick={(order) => {
               setSelectedOrder(order);
@@ -5452,29 +7009,31 @@ export default function App() {
           <ChatRoom 
             userId={currentUserId}
             chat={selectedChat} 
+            lang={lang}
             onBack={handleBack} 
           />
         )}
         {showRules && (
-          <RulesPage onAccept={() => {
-            setShowRules(false);
-            setActiveTab('home');
-          }} />
+          <RulesPage 
+            onAccept={() => {
+              setShowRules(false);
+              setActiveTab('home');
+            }} 
+          />
         )}
-        <AnimatePresence>
-          {confirmDialog.isOpen && (
-            <ConfirmationDialog 
-              isOpen={confirmDialog.isOpen}
-              title={confirmDialog.title}
-              message={confirmDialog.message}
-              type={confirmDialog.type}
-              onConfirm={confirmDialog.onConfirm}
-              onClose={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
-            />
-          )}
-        </AnimatePresence>
-      </AnimatePresence>
-    </div>
-  </ErrorBoundary>
-);
+        {confirmDialog.isOpen && (
+          <ConfirmationDialog 
+            isOpen={confirmDialog.isOpen}
+            title={confirmDialog.title}
+            message={confirmDialog.message}
+            type={confirmDialog.type}
+            onConfirm={confirmDialog.onConfirm}
+            onClose={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+          />
+        )}
+          </AnimatePresence>
+        </div>
+      </div>
+    </ErrorBoundary>
+  );
 }
